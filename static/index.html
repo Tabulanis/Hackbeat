@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arranger 0.0.11</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="brand">ARRANGER <span class="ver">0.0.11</span></div>
+
+  <div class="transport">
+    <button id="btn-play-pat" title="Play pattern (Space)">&#9654;</button>
+    <button id="btn-play-song-top" title="Play whole song from the start (Shift+Space)">|&#9654;</button>
+    <button id="btn-play-song" title="Play song (Shift+Space)">&#9654;&#9654;</button>
+    <button id="btn-stop" title="Stop (Esc)">&#9632;</button>
+    <div id="pos-display" class="readout">00/00</div>
+  </div>
+
+  <div class="ctl">
+    <label>BPM</label>
+    <input id="bpm" type="number" min="30" max="300" value="125">
+  </div>
+  <div class="ctl">
+    <label>Rows/Beat</label>
+    <input id="rpb" type="number" min="1" max="16" value="4">
+  </div>
+  <div class="ctl">
+    <label>Octave</label>
+    <input id="octave" type="number" min="1" max="8" value="5">
+  </div>
+  <div class="ctl">
+    <button id="btn-edit" class="toggled" title="When on, note keys write into the pattern">REC</button>
+  </div>
+  <div class="ctl">
+    <button id="btn-wave" class="toggled" title="Waveform ribbons in the pattern grid">WAVE</button>
+    <button id="btn-vu" class="toggled" title="Live VU meters in channel headers">VU</button>
+  </div>
+  <div class="ctl">
+    <label>Zoom</label>
+    <button id="zoom-out" title="Zoom out (narrower cells)">&minus;</button>
+    <button id="zoom-in" title="Zoom in (wider cells)">+</button>
+  </div>
+
+  <div class="ctl">
+    <label>Pattern</label>
+    <select id="pattern-select"></select>
+    <button id="btn-add-pattern" title="New pattern">+</button>
+    <input id="pattern-rows" type="number" min="8" max="256" value="64" title="Rows in this pattern">
+  </div>
+
+  <div class="ctl">
+    <button id="btn-add-channel">+ Channel</button>
+    <button id="btn-rm-channel">- Channel</button>
+  </div>
+
+  <button id="btn-help" title="Help (F1)">?</button>
+
+  <div class="spacer"></div>
+  
+  <div class="ctl">
+    <label>Master</label>
+    <input id="master-vol" type="range" min="0" max="1.5" step="0.01" value="0.9" style="width: 80px;">
+  </div>
+
+  <div class="ctl">
+    <input id="project-name" type="text" value="untitled" spellcheck="false">
+    <button id="btn-save">Save</button>
+    <select id="project-list"><option value="">Load...</option></select>
+  </div>
+
+  <button id="btn-export" class="accent">Export WAV</button>
+</header>
+
+<div id="order-bar">
+  <button id="btn-play-song-order" class="accent" title="Play the whole song">&#9654; Song</button>
+  <span class="order-label">ORDER</span>
+  <div id="order-chips"></div>
+  <button id="btn-order-add" title="Append current pattern to the song order">+ Add pattern</button>
+</div>
+
+<main id="workspace">
+
+  <aside id="palette">
+    <div class="palette-head">
+      <span>INSTRUMENTS</span>
+    </div>
+    <div id="instrument-list"></div>
+
+    <div class="palette-head">
+      <span>LIBRARY</span>
+      <div>
+        <button id="btn-refresh" title="Rescan sample folder">&#8635;</button>
+        <button id="btn-rec" title="Record from microphone">&#9679; Rec</button>
+        <button id="btn-upload" title="Import audio files">+ Import</button>
+        <input id="file-input" type="file" accept="audio/*,.wav,.mp3,.ogg,.flac,.aiff" multiple hidden>
+      </div>
+    </div>
+    <div id="palette-list"></div>
+    <div class="palette-foot">Click a sample to load it as the next instrument &middot; &#9654; previews</div>
+
+    <div class="palette-head"><span>GENERATE</span></div>
+    <div id="gen-panel">
+      <input id="gen-prompt" type="text" placeholder="e.g. punchy analog techno kick" spellcheck="false">
+      <div class="gen-row gen-style">
+        <button class="gen-style-btn" data-style="single" title="Adds: one solo instrument, unaccompanied">Single</button>
+        <button class="gen-style-btn" data-style="ensemble" title="Adds: full ensemble, layered arrangement">Ensemble</button>
+        <button class="gen-style-btn" data-style="onenote" title="Adds: one sustained pitch only - great for playable instruments">One Note</button>
+      </div>
+      <div class="gen-row">
+        <label>Sec</label>
+        <input id="gen-dur" type="number" min="1" max="20" value="4">
+        <select id="gen-model">
+          <option value="facebook/musicgen-small" selected>small (fast)</option>
+          <option value="facebook/musicgen-medium">medium (better)</option>
+        </select>
+      </div>
+      <div class="gen-row">
+        <button id="gen-hum">&#9679; Hum</button>
+        <span id="gen-melody-status" class="em-info">no melody</span>
+        <button id="gen-melody-clear" class="mini-btn" hidden title="Clear melody">&#10005;</button>
+      </div>
+      <button id="btn-generate" class="accent">Generate</button>
+      <div id="gen-status"></div>
+    </div>
+  </aside>
+
+  <section id="grid-wrap">
+    <div id="pattern-grid" tabindex="0"></div>
+    <div class="grid-foot">
+      Time flows &rarr; &middot; &larr;&rarr; move &middot; &uarr;&darr; channel &middot; Z&ndash;M / Q&ndash;P &middot; ` = off &middot; Shift+Arrows/Click select &middot; Ctrl+C/V &middot; digits edit vol/inst &middot; Del clears
+    </div>
+  </section>
+
+  <aside id="fx-panel">
+    <div class="palette-head"><span id="fx-title">CHANNEL</span></div>
+    <div id="fx-body"></div>
+  </aside>
+
+</main>
+
+<div id="em-overlay" hidden>
+  <div id="em-box">
+    <div class="em-head">
+      <span id="em-title">SAMPLE EDITOR</span>
+      <button id="em-close" class="mini-btn">&#10005;</button>
+    </div>
+    <canvas id="em-wave" width="920" height="200"></canvas>
+    <div class="em-info" id="em-info">no sample loaded</div>
+    <div class="em-row">
+      <button id="em-play">&#9654; Play</button>
+      <button id="em-stop">&#9632;</button>
+      <button id="em-undo">Undo</button>
+      <span class="em-sep"></span>
+      <button id="em-fadein">Fade In</button>
+      <button id="em-fadeout">Fade Out</button>
+      <button id="em-normalize">Normalize</button>
+      <button id="em-trim">Trim</button>
+      <button id="em-cut">Cut</button>
+      <button id="em-silence">Silence</button>
+      <button id="em-reverse">Reverse</button>
+      <button id="em-gdown">&minus;3dB</button>
+      <button id="em-gup">+3dB</button>
+    </div>
+    <div class="em-row">
+      <label class="em-lab">FX</label>
+      <select id="em-fx">
+        <option value="dist">Distortion</option>
+        <option value="crush">Bitcrush</option>
+        <option value="lowpass">Lowpass</option>
+        <option value="highpass">Highpass</option>
+        <option value="delay">Delay</option>
+        <option value="reverb">Reverb</option>
+      </select>
+      <label class="em-lab" id="em-p1-label">Drive</label>
+      <input id="em-p1" type="range" min="0" max="1" step="0.01" value="0.4">
+      <label class="em-lab" id="em-p2-label">Mix</label>
+      <input id="em-p2" type="range" min="0" max="1" step="0.01" value="0.4">
+      <button id="em-fxapply" class="accent">Apply FX</button>
+    </div>
+    <div class="em-row">
+      <button id="em-record">&#9679; Record</button>
+      <button id="em-tomelody" title="Use this audio as the melody for AI generation">&#8594; Melody</button>
+    </div>
+    <div class="em-row">
+      <span class="em-lab">GENERATE</span>
+      <span id="em-recstatus" class="em-info"></span>
+    </div>
+    <div class="em-row">
+      <label class="em-lab">Name</label>
+      <input id="em-name" type="text" spellcheck="false">
+      <button id="em-savenew" class="accent">Save as New</button>
+      <button id="em-replace">Replace</button>
+      <button id="em-applycell" hidden>Apply to This Cell</button>
+    </div>
+    <div class="em-row">
+      <span id="em-cellhint" class="em-info" hidden>Replace changes EVERY cell using this sample &middot; Apply to This Cell forks an edited copy for just this one cell</span>
+    </div>
+        <div class="em-row em-gen-row">
+      <input id="em-gen-prompt" type="text" placeholder="style / instrument prompt" spellcheck="false">
+      <input id="em-gen-dur" type="number" min="1" max="20" value="4" title="Seconds">
+      <select id="em-gen-model">
+        <option value="facebook/musicgen-small" selected>small (fast)</option>
+        <option value="facebook/musicgen-medium">medium (better)</option>
+      </select>
+      <button id="em-gen-tomelody" title="Use the audio currently loaded above as the melody">Use audio as melody</button>
+      <button id="em-generate" class="accent">Generate into editor</button>
+    </div>
+    <div class="em-row gen-style">
+      <button class="gen-style-btn" data-style="single" title="Adds: one solo instrument, unaccompanied">Single</button>
+      <button class="gen-style-btn" data-style="ensemble" title="Adds: full ensemble, layered arrangement">Ensemble</button>
+      <button class="gen-style-btn" data-style="onenote" title="Adds: one sustained pitch only - great for playable instruments">One Note</button>
+    </div>
+    <div class="em-row">
+      <span id="em-gen-status" class="em-info"></span>
+      <span id="em-gen-melody-status" class="em-info"></span>
+    </div>
+  </div>
+</div>
+
+<div id="help-overlay" hidden>
+  <div id="help-box">
+    <div class="help-head">
+      <span>ARRANGER HELP</span>
+      <button id="help-close" class="mini-btn">&#10005;</button>
+    </div>
+    <div class="help-body">
+      <nav id="help-nav">
+        <a href="#h-start">Getting Started</a>
+        <a href="#h-grid">The Grid (Timeline)</a>
+        <a href="#h-notes">Entering Notes</a>
+        <a href="#h-keys">Keyboard Shortcuts</a>
+        <a href="#h-channels">Channels</a>
+        <a href="#h-fx">Mixing &amp; Effects</a>
+        <a href="#h-instruments">Instruments &amp; the Library</a>
+        <a href="#h-editor">The Sound Editor</a>
+        <a href="#h-ai">AI Sample Generation</a>
+        <a href="#h-projects">Saving, Loading &amp; Export</a>
+        <a href="#h-troubleshoot">Troubleshooting</a>
+      </nav>
+      <div id="help-content">
+
+        <section id="h-start">
+          <h2>Getting Started</h2>
+          <p>Arranger is a music tracker with a twist: instead of the classic
+          up-and-down pattern grid, time flows <strong>left to right</strong>,
+          like a video editor timeline. Each horizontal lane is a channel.
+          Notes live in cells along that lane.</p>
+          <p>The fastest way to hear something:</p>
+          <ol>
+            <li>Click a sample in the <strong>LIBRARY</strong> list (bottom-left).
+                That loads it into the current instrument slot, shown in the
+                <strong>INSTRUMENTS</strong> list above it.</li>
+            <li>Click into the grid, then press a note key
+                (<code>Z</code>, <code>S</code>, <code>X</code>, <code>D</code>,
+                <code>C</code>&hellip; see <a href="#h-notes">Entering Notes</a>).
+                A note appears in the cell and the cursor moves forward.</li>
+            <li>Press <strong>Space</strong> to hear the pattern play.</li>
+          </ol>
+        </section>
+
+        <section id="h-grid">
+          <h2>The Grid (Timeline)</h2>
+          <p>Each row down the left is a <strong>channel</strong> &mdash; its own
+          instrument, volume, mute/solo, and effects. Time runs across the
+          row. Each cell holds three things, shown as
+          <code class="s-note">note</code> <code class="s-inst">inst</code>
+          <code class="s-vol">vol</code>:</p>
+          <ul>
+            <li><strong>Note</strong> &mdash; which pitch plays, e.g. <code>C-5</code>.
+                <code>===</code> means "note off" &mdash; it stops whatever is
+                currently sounding on that channel.</li>
+            <li><strong>Inst</strong> &mdash; which instrument slot to use. Leave it
+                blank and the cell just uses whichever instrument is currently
+                selected in the INSTRUMENTS list.</li>
+            <li><strong>Vol</strong> &mdash; per-note volume, 0&ndash;64. Blank means
+                full volume.</li>
+          </ul>
+          <p><strong>Splitting a cell:</strong> double-click any cell to
+          split it into 2, 3, or 4 evenly-timed hits (double-click again to
+          cycle, or use the Split buttons in the cell inspector on the
+          right). Each hit holds its own note &mdash; perfect for 16ths,
+          triplets, or rolls without changing the whole pattern's
+          resolution.</p>
+          <p><strong>Right-click a cell</strong> that has a note to open that
+          cell's sample in the Sound Editor. From there,
+          <em>Apply to This Cell</em> saves your edit as a new sample used by
+          just that one cell, while <em>Replace</em> changes every cell that
+          uses the sample.</p>
+          <p><strong>Zoom</strong> (top toolbar, <code>&minus;</code> / <code>+</code>)
+          stretches or squeezes the whole timeline &mdash; handy when you're
+          working on fine detail versus looking at the whole arrangement.</p>
+          <p>Turn the coloured <strong>waveform ribbons</strong> and the
+          <strong>VU meters</strong> in each channel header on or off with the
+          WAVE / VU buttons in the toolbar &mdash; purely visual, no effect on
+          sound.</p>
+        </section>
+
+        <section id="h-notes">
+          <h2>Entering Notes</h2>
+          <p>Two rows of your keyboard act like piano keys, just like a
+          classic tracker:</p>
+          <table class="help-table">
+            <tr><th>Lower row</th><td><code>Z S X D C V G B H N J M</code></td></tr>
+            <tr><th>Upper row</th><td><code>Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P</code></td></tr>
+          </table>
+          <p>These map to a full chromatic scale starting at the
+          <strong>Octave</strong> shown in the toolbar. Change the octave
+          number to reach higher or lower notes.</p>
+          <p><code>`</code> (backtick) enters a note-off (<code>===</code>)
+          instead of a pitch &mdash; use it to cut a sustained sample short.</p>
+          <p>Notes only get written into the grid while
+          <strong>REC</strong> (top toolbar) is lit up. Turn REC off and the
+          same keys just preview sound without touching the pattern &mdash;
+          handy for auditioning without risk of overwriting anything.</p>
+        </section>
+
+        <section id="h-keys">
+          <h2>Keyboard Shortcuts</h2>
+          <table class="help-table">
+            <tr><th>Space</th><td>Play / stop the current pattern</td></tr>
+            <tr><th>Shift + Space</th><td>Play / stop the whole song (follows the ORDER list)</td></tr>
+            <tr><th>Escape</th><td>Stop playback</td></tr>
+            <tr><th>&larr; &rarr;</th><td>Move the cursor one field / cell at a time</td></tr>
+            <tr><th>Shift + &larr; &rarr;</th><td>Jump a whole cell at a time (skip note/inst/vol sub-fields)</td></tr>
+            <tr><th>&uarr; &darr;</th><td>Move the cursor up/down between channels</td></tr>
+            <tr><th>Tab / Shift+Tab</th><td>Jump forward/back one row</td></tr>
+            <tr><th>Page Up / Page Down</th><td>Jump 16 rows at a time</td></tr>
+            <tr><th>Home / End</th><td>Jump to the first / last row of the pattern</td></tr>
+            <tr><th>0&ndash;9</th><td>Type digits directly into the Inst or Vol field</td></tr>
+            <tr><th>. (period)</th><td>Clear just the field the cursor is on</td></tr>
+            <tr><th>Delete / Backspace</th><td>Clear the field (or the whole selection, if you have one)</td></tr>
+            <tr><th>Shift + Click / Arrows</th><td>Select a block of cells</td></tr>
+            <tr><th>Ctrl/Cmd + C</th><td>Copy the selected block</td></tr>
+            <tr><th>Ctrl/Cmd + V</th><td>Paste at the cursor</td></tr>
+            <tr><th>Double-click cell</th><td>Split the cell into 2/3/4 timed hits (cycles)</td></tr>
+            <tr><th>Right-click cell</th><td>Edit that cell's sample (fork for this cell, or replace all)</td></tr>
+            <tr><th>F1</th><td>Open this help</td></tr>
+          </table>
+        </section>
+
+        <section id="h-channels">
+          <h2>Channels</h2>
+          <p>Each channel header (left side of its lane) has:</p>
+          <ul>
+            <li><strong>Name</strong> &mdash; click to rename.</li>
+            <li><strong>M</strong> (Mute) &mdash; silences that channel.</li>
+            <li><strong>S</strong> (Solo) &mdash; silences every <em>other</em>
+                channel. Solo more than one channel and only those play.</li>
+            <li><strong>STRIP</strong> &mdash; opens that channel's mixer strip
+                and effects in the right-hand panel (see
+                <a href="#h-fx">Mixing &amp; Effects</a>).</li>
+          </ul>
+          <p><strong>+ Channel</strong> / <strong>&minus; Channel</strong> in the
+          top toolbar add or remove lanes.</p>
+        </section>
+
+        <section id="h-fx">
+          <h2>Mixing &amp; Effects</h2>
+          <p>Click <strong>STRIP</strong> on any channel to open its settings
+          on the right:</p>
+          <ul>
+            <li><strong>Volume &amp; Pan</strong> &mdash; basic level and
+                left/right position.</li>
+            <li><strong>3-Band EQ</strong> &mdash; boost or cut low, mid, and
+                high frequencies.</li>
+            <li><strong>Insert effects</strong> &mdash; Bitcrusher, Distortion,
+                and Chorus live entirely on that one channel.</li>
+            <li><strong>Reverb Send / Delay Send</strong> &mdash; how much of
+                <em>this channel</em> gets fed into the shared reverb and
+                delay.</li>
+          </ul>
+          <p><strong>Why "send"?</strong> Reverb and delay are expensive to
+          compute, so instead of giving every channel its own full reverb
+          unit, Arranger runs <em>one</em> shared reverb and <em>one</em>
+          shared delay that every channel can send into &mdash; exactly how a
+          real mixing console works. That's why the actual reverb
+          <strong>decay time</strong> and delay <strong>time/feedback</strong>
+          aren't per-channel knobs &mdash; they live in
+          <strong>SEND BUSES (GLOBAL)</strong> at the bottom of the panel, and
+          changing them there affects every channel's send at once.</p>
+          <p>The master volume slider (top-right) sits after an automatic
+          <strong>headroom</strong> stage and a limiter, so adding more
+          channels won't suddenly cause harsh clipping &mdash; the mix quietly
+          makes room for itself as tracks are added.</p>
+        </section>
+
+        <section id="h-instruments">
+          <h2>Instruments &amp; the Library</h2>
+          <p>There are two different sample lists in the left sidebar &mdash;
+          it's worth knowing the difference:</p>
+          <ul>
+            <li><strong>INSTRUMENTS</strong> (top) &mdash; the samples actually
+                loaded into <em>this song</em>, numbered 01, 02, 03&hellip;
+                Pattern cells refer to these numbers.</li>
+            <li><strong>LIBRARY</strong> (bottom) &mdash; every sample file
+                sitting on disk, whether or not it's currently used in the
+                song. Click one to load it into the next instrument slot.</li>
+          </ul>
+          <p>Both lists have the same three buttons on each row:</p>
+          <ul>
+            <li><strong>&#9654;</strong> &mdash; preview the sound.</li>
+            <li><strong>&#9998;</strong> &mdash; open it in the
+                <a href="#h-editor">Sound Editor</a>.</li>
+            <li><strong>&times;</strong> &mdash; remove it. On the LIBRARY list
+                this <em>deletes the file from disk</em> and will warn you if
+                it's currently in use somewhere in the song. On the
+                INSTRUMENTS list it just removes that slot from the song.</li>
+          </ul>
+          <p>If a library file gets deleted while it's still loaded as an
+          instrument, that instrument's row dims and is marked
+          <strong>(missing)</strong> &mdash; its pattern cells will play
+          silently until you load a replacement sample into that slot.</p>
+        </section>
+
+        <section id="h-editor">
+          <h2>The Sound Editor</h2>
+          <p>Double-click any sample (in either list) to open the editor.
+          Drag on the waveform to select a region &mdash; most tools work on
+          the selection, or the whole sample if nothing's selected.</p>
+          <ul>
+            <li><strong>Fade In / Fade Out</strong> &mdash; smooth ramps over
+                the selection.</li>
+            <li><strong>Normalize</strong> &mdash; raises the loudest point to
+                just under full volume.</li>
+            <li><strong>Trim</strong> &mdash; keeps only the selection,
+                discards the rest.</li>
+            <li><strong>Cut</strong> &mdash; removes the selection, keeps the
+                rest.</li>
+            <li><strong>Silence</strong> &mdash; mutes the selection without
+                changing its length.</li>
+            <li><strong>Reverse</strong> &mdash; plays the selection backwards.</li>
+            <li><strong>&minus;3dB / +3dB</strong> &mdash; quick gain nudges.</li>
+            <li><strong>Undo</strong> &mdash; steps back through your last few
+                edits.</li>
+            <li><strong>FX dropdown</strong> &mdash; permanently bakes
+                Distortion, Bitcrush, Lowpass/Highpass, Delay, or Reverb into
+                the audio (unlike the channel sends, this actually changes
+                the sample file).</li>
+            <li><strong>&#9679; Record</strong> &mdash; records from your
+                microphone straight into the editor.</li>
+          </ul>
+          <p>When you're happy, either:</p>
+          <ul>
+            <li><strong>Save as New</strong> &mdash; writes a new file, leaving
+                the original untouched.</li>
+            <li><strong>Replace</strong> &mdash; overwrites the original file
+                everywhere it's used.</li>
+          </ul>
+        </section>
+
+        <section id="h-ai">
+          <h2>AI Sample Generation</h2>
+          <p>The <strong>GENERATE</strong> panel (bottom-left, and also inside
+          the Sound Editor) turns a text prompt into a new sample using
+          MusicGen. Type a style or instrument description, set a duration,
+          and hit Generate. First run downloads the model, so it'll be slow
+          exactly once.</p>
+          <p><strong>Style buttons:</strong> the Single / Ensemble /
+          One Note buttons quietly append extra instructions to your prompt.
+          <em>Single</em> pushes the model toward one unaccompanied
+          instrument, <em>Ensemble</em> toward a full layered arrangement,
+          and <em>One Note</em> toward a single sustained pitch &mdash; ideal
+          when you want a clean playable instrument tone, since Arranger
+          repitches from C-5. Click a button again to turn it off.</p>
+          <p><strong>Hum or whistle a melody:</strong> hit
+          <strong>&#9679; Hum</strong>, record yourself humming or whistling,
+          then type a style prompt (e.g. "warm analog synth lead") and
+          Generate. Arranger extracts the melody's pitch contour and
+          generates new audio that follows it in that style &mdash; this
+          automatically switches to the melody-aware model.</p>
+          <p>You can also send audio already open in the Sound Editor as the
+          melody, using its own <strong>Use audio as melody</strong> button
+          &mdash; useful if you've recorded or trimmed a whistle first.</p>
+        </section>
+
+        <section id="h-projects">
+          <h2>Saving, Loading &amp; Export</h2>
+          <ul>
+            <li><strong>Save</strong> &mdash; stores the whole song (patterns,
+                instruments, mixer/FX settings, order) under the name in the
+                text box next to it.</li>
+            <li><strong>Load&hellip;</strong> dropdown &mdash; loads a
+                previously saved song.</li>
+            <li>Your work also <strong>autosaves</strong> to this browser as
+                you go, and restores automatically next time you open
+                Arranger &mdash; separate from named Save/Load.</li>
+            <li><strong>ORDER</strong> bar &mdash; the sequence of patterns
+                that make up the whole song. <strong>+ Add pattern</strong>
+                appends the pattern you're currently viewing. If you never
+                set an order, "play song" and "export" just play/render every
+                pattern you've made, in order.</li>
+            <li><strong>Export WAV</strong> &mdash; renders the whole song
+                (following ORDER) to a downloadable 48kHz WAV file.</li>
+          </ul>
+        </section>
+
+        <section id="h-troubleshoot">
+          <h2>Troubleshooting</h2>
+          <ul>
+            <li><strong>An instrument looks greyed out and says
+                "(missing)".</strong> Its sample file was deleted from the
+                LIBRARY. Load a different sample into that slot, or find the
+                original file and re-import it.</li>
+            <li><strong>Generate fails with an error about dependencies.</strong>
+                The AI packages (torch/transformers) aren't installed in this
+                copy's virtual environment &mdash; re-run the installer
+                without the <code>--no-ai</code> flag.</li>
+            <li><strong>Sound gets crackly or harsh with lots of channels.</strong>
+                Check the master headroom is doing its job &mdash; try easing
+                back individual channel volumes and the SEND BUSES send
+                amounts rather than the master fader.</li>
+            <li><strong>Recording or Humming doesn't prompt for the
+                microphone.</strong> Browsers only allow mic access on
+                <code>localhost</code> or secure (https) pages &mdash; make
+                sure you're opening Arranger at
+                <code>http://localhost:8200</code>.</li>
+          </ul>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
