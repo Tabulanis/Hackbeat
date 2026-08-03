@@ -45,6 +45,20 @@ function makeChannel(n) {
 function makePattern(rows, channels) {
   return { rows, data: Array.from({ length: rows }, () => Array(channels).fill(null)) };
 }
+/** A blank project, same shape as the initial `song` below -- reused by
+ * the New button so "new" and "first load ever" are guaranteed to mean
+ * the same thing, not two independently-maintained defaults. */
+function newSongData() {
+  return {
+    bpm: 125,
+    rowsPerBeat: 4,
+    instruments: [],
+    channels: [1, 2, 3, 4, 5, 6, 7, 8].map(makeChannel),
+    patterns: [makePattern(64, 8)],
+    order: [0],
+    fxBus: { reverbDecay: 2.0, delayTime: 0.3, delayFb: 0.35 },
+  };
+}
 
 /* ================= song state ================= */
 const song = {
@@ -75,7 +89,16 @@ const ui = {
 const secPerRow = () => 60 / (song.bpm * song.rowsPerBeat);
 
 /* ================= session autosave ================= */
+/* True whenever there are changes not yet reflected in a named Save.
+   autosave() fires after nearly every edit already, so it's the one
+   choke point that sees every mutation -- reused here rather than
+   threading a dirty=true call through every edit site individually.
+   saveProject()/loadProject() explicitly clear it back to false right
+   after their own autosave() call, since that one isn't "new changes",
+   it's just persisting the just-saved/just-loaded state. */
+let dirty = false;
 function autosave() {
+  dirty = true;
   try {
     localStorage.setItem("arranger_autosave", JSON.stringify(serialize()));
   } catch (e) {
@@ -2170,19 +2193,90 @@ function serialize() {
   };
 }
 
+/** Base64-encodes one sample's audio, re-rendering it as WAV through the
+ * same encodeWav() used everywhere else in the editor -- consistent
+ * output regardless of the sample's original file format. */
+async function sampleToBase64(path) {
+  const buf = await getBuffer(path);
+  const blob = encodeWav(buf);
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = () => reject(new Error("Could not encode " + path));
+    r.readAsDataURL(blob);
+  });
+}
+
+/** serialize() alone only stores sample *paths* -- if the shared library
+ * changes later (a sample gets deleted, overwritten, or this project is
+ * moved elsewhere), a project saved that way can silently break. Only
+ * used by an explicit named Save, NOT by autosave: autosave fires on
+ * nearly every keystroke, and re-encoding every referenced sample to
+ * base64 that often would be slow and would blow past localStorage's
+ * size limit fast. A deliberate Save is rare enough to afford it. */
+async function serializeWithSamples() {
+  const base = serialize();
+  const paths = [...new Set(song.instruments.map((i) => i.path))];
+  const sampleData = {};
+  for (const path of paths) {
+    try {
+      sampleData[path] = await sampleToBase64(path);
+    } catch (err) {
+      toast("Could not include sample in save: " + path);
+    }
+  }
+  return { ...base, sampleData };
+}
+
+/** Writes back any samples embedded in a loaded project that aren't
+ * already in the library -- restores them as real files, not just an
+ * in-memory patch, so they show up in the Library panel and are usable
+ * like any other sample from here on. Skips anything already present,
+ * so reloading the same project repeatedly doesn't keep re-writing
+ * identical files. */
+async function restoreSamplesFromProject(data) {
+  if (!data.sampleData) return;
+  for (const [path, b64] of Object.entries(data.sampleData)) {
+    if (knownSamplePaths.has(path)) continue;
+    try {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      await fetch("/api/sample/save?path=" + encodeURIComponent(path) + "&overwrite=0", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: bytes,
+      });
+    } catch (err) {
+      toast("Could not restore sample: " + path);
+    }
+  }
+  await refreshPalette();
+}
+
 async function saveProject() {
   const name = $("#project-name").value.trim() || "untitled";
-  const res = await fetch("/api/projects/" + encodeURIComponent(name), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(serialize()),
-  });
-  if (res.ok) { 
-    toast("Saved: " + name); 
-    refreshProjectList(); 
-    autosave(); 
+  const btn = $("#btn-save");
+  btn.disabled = true;
+  toast("Saving…");
+  try {
+    const payload = await serializeWithSamples();
+    const res = await fetch("/api/projects/" + encodeURIComponent(name), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      toast("Saved: " + name);
+      refreshProjectList();
+      autosave();
+      dirty = false;
+    } else {
+      toast("Save failed");
+    }
+  } finally {
+    btn.disabled = false;
   }
-  else toast("Save failed");
 }
 
 function applyProjectData(data, name) {
@@ -2257,9 +2351,26 @@ async function loadProject(name) {
   const data = await res.json();
   if (data.kind !== "tracker") { toast("Not a tracker project: " + name); return; }
   stopPlayback();
+  // Restore any embedded samples BEFORE applying the project data --
+  // applyProjectData preloads each instrument's buffer immediately and
+  // reports "Missing sample" if that fails, so the files need to exist
+  // on disk first.
+  await restoreSamplesFromProject(data);
   applyProjectData(data, name);
   autosave();
+  dirty = false;
   toast("Loaded: " + name);
+}
+
+/** Shared by New and Load: asks to save only if there's something
+ * unsaved to lose, and only proceeds with the actual save if the user
+ * says yes -- a plain confirm() to match every other "are you sure"
+ * in this app (delete pattern, delete instrument, remove sample). */
+async function offerSaveIfDirty(actionLabel) {
+  if (!dirty) return;
+  if (confirm("Save changes before " + actionLabel + "?")) {
+    await saveProject();
+  }
 }
 
 async function refreshProjectList() {
@@ -2276,9 +2387,20 @@ async function refreshProjectList() {
 }
 
 $("#btn-save").addEventListener("click", saveProject);
-$("#project-list").addEventListener("change", (e) => {
-  if (e.target.value) loadProject(e.target.value);
+$("#btn-new").addEventListener("click", async () => {
+  await offerSaveIfDirty("starting a new project");
+  stopPlayback();
+  applyProjectData(newSongData(), "untitled");
+  autosave();
+  dirty = false;
+  toast("New project");
+});
+$("#project-list").addEventListener("change", async (e) => {
+  const name = e.target.value;
   e.target.value = "";
+  if (!name) return;
+  await offerSaveIfDirty('loading "' + name + '"');
+  loadProject(name);
 });
 $("#project-name").addEventListener("change", autosave);
 
