@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Arranger 0.0.11</title>
+<title>Hackbeat</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header id="topbar">
-  <div class="brand">ARRANGER <span class="ver">0.0.11</span></div>
+  <div class="brand">HACKBEAT</div>
 
   <div class="transport">
     <button id="btn-play-pat" title="Play pattern (Space)">&#9654;</button>
@@ -235,7 +235,7 @@
 <div id="help-overlay" hidden>
   <div id="help-box">
     <div class="help-head">
-      <span>ARRANGER HELP</span>
+      <span>HACKBEAT HELP</span>
       <button id="help-close" class="mini-btn">&#10005;</button>
     </div>
     <div class="help-body">
@@ -256,7 +256,7 @@
 
         <section id="h-start">
           <h2>Getting Started</h2>
-          <p>Arranger is a music tracker with a twist: instead of the classic
+          <p>Hackbeat is a music tracker with a twist: instead of the classic
           up-and-down pattern grid, time flows <strong>left to right</strong>,
           like a video editor timeline. Each horizontal lane is a channel.
           Notes live in cells along that lane.</p>
@@ -386,7 +386,7 @@
           </ul>
           <p><strong>Why "send"?</strong> Reverb and delay are expensive to
           compute, so instead of giving every channel its own full reverb
-          unit, Arranger runs <em>one</em> shared reverb and <em>one</em>
+          unit, Hackbeat runs <em>one</em> shared reverb and <em>one</em>
           shared delay that every channel can send into &mdash; exactly how a
           real mixing console works. That's why the actual reverb
           <strong>decay time</strong> and delay <strong>time/feedback</strong>
@@ -475,12 +475,12 @@
           <em>Single</em> pushes the model toward one unaccompanied
           instrument, <em>Ensemble</em> toward a full layered arrangement,
           and <em>One Note</em> toward a single sustained pitch &mdash; ideal
-          when you want a clean playable instrument tone, since Arranger
+          when you want a clean playable instrument tone, since Hackbeat
           repitches from C-5. Click a button again to turn it off.</p>
           <p><strong>Hum or whistle a melody:</strong> hit
           <strong>&#9679; Hum</strong>, record yourself humming or whistling,
           then type a style prompt (e.g. "warm analog synth lead") and
-          Generate. Arranger extracts the melody's pitch contour and
+          Generate. Hackbeat extracts the melody's pitch contour and
           generates new audio that follows it in that style &mdash; this
           automatically switches to the melody-aware model.</p>
           <p>You can also send audio already open in the Sound Editor as the
@@ -498,7 +498,7 @@
                 previously saved song.</li>
             <li>Your work also <strong>autosaves</strong> to this browser as
                 you go, and restores automatically next time you open
-                Arranger &mdash; separate from named Save/Load.</li>
+                Hackbeat &mdash; separate from named Save/Load.</li>
             <li><strong>ORDER</strong> bar &mdash; the sequence of patterns
                 that make up the whole song. <strong>+ Add pattern</strong>
                 appends the pattern you're currently viewing. If you never
@@ -527,7 +527,7 @@
             <li><strong>Recording or Humming doesn't prompt for the
                 microphone.</strong> Browsers only allow mic access on
                 <code>localhost</code> or secure (https) pages &mdash; make
-                sure you're opening Arranger at
+                sure you're opening Hackbeat at
                 <code>http://localhost:8200</code>.</li>
           </ul>
         </section>

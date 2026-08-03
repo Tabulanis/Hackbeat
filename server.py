@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arranger 0.0.11 — tracker/timeline sample editor. FastAPI backend.
+"""Hackbeat — tracker/timeline sample editor. FastAPI backend.
 
 Serves the static frontend, the sample library, and project save/load.
 Phase 2 (AI sample generation) plugs into /api/generate.
@@ -27,7 +27,7 @@ AUDIO_EXT = {".wav", ".mp3", ".ogg", ".flac", ".aiff", ".aif", ".m4a", ".webm"}
 SAMPLES.mkdir(exist_ok=True)
 PROJECTS.mkdir(exist_ok=True)
 
-app = FastAPI(title="Arranger")
+app = FastAPI(title="Hackbeat")
 
 
 def safe_child(base: Path, rel: str) -> Path:
@@ -286,5 +286,5 @@ def generate(req: GenRequest):
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
 
 if __name__ == "__main__":
-    print(f"Arranger 0.0.11 running at http://localhost:{PORT}")
+    print(f"Hackbeat running at http://localhost:{PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)

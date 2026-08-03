@@ -1,4 +1,4 @@
-/* Arranger — tracker edition.
+/* Hackbeat — tracker edition.
    OpenMPT-style top-down pattern editor. Cell = Note | Instrument | Volume.
    Per-channel FX chain (Web Audio): eq -> panner -> distortion -> bitcrush -> chorus -> delay -> reverb.
 */
@@ -100,7 +100,7 @@ let dirty = false;
 function autosave() {
   dirty = true;
   try {
-    localStorage.setItem("arranger_autosave", JSON.stringify(serialize()));
+    localStorage.setItem("hackbeat_autosave", JSON.stringify(serialize()));
   } catch (e) {
     console.warn("Autosave failed", e);
   }
@@ -2482,7 +2482,7 @@ async function exportWav() {
   const blob = encodeWav(rendered);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = ($("#project-name").value.trim() || "arranger") + ".wav";
+  a.download = ($("#project-name").value.trim() || "hackbeat") + ".wav";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast("Exported WAV (" + Math.round(totalRows * spr) + "s + tail)");
@@ -3036,7 +3036,7 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
   startVuLoop();
   applyZoom();
   
-  const saved = localStorage.getItem("arranger_autosave");
+  const saved = localStorage.getItem("hackbeat_autosave");
   if (saved) {
     try {
       const data = JSON.parse(saved);

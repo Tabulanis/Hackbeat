@@ -1,4 +1,4 @@
-# Rhapsody
+# Hackbeat
 
 A browser-based music tracker with a twist: instead of the classic up-and-down
 pattern grid, time flows left to right — like a video editor's timeline. Each
@@ -22,7 +22,7 @@ account, no cloud dependency for the actual music-making.
 - **AI sample generation** — type a style or instrument description and get
   a new sample back via MusicGen. Style buttons steer it toward a single
   instrument, a full layered ensemble, or one sustained note (handy since
-  Rhapsody repitches everything from C-5). You can also hum or whistle a
+  Hackbeat repitches everything from C-5). You can also hum or whistle a
   melody and have it generate new audio that follows your melodic contour.
 - **Project save/load** and pattern chaining into a full song, with export.
 - **Built-in help panel** covering getting started, entering notes, the
@@ -32,8 +32,8 @@ account, no cloud dependency for the actual music-making.
 ## Quickstart
 
 ```bash
-git clone https://github.com/Tabulanis/Rhapsody.git
-cd Rhapsody
+git clone https://github.com/Tabulanis/Hackbeat.git
+cd Hackbeat
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 venv/bin/python server.py
