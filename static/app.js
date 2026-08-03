@@ -1077,8 +1077,18 @@ function rafHighlight() {
         : grid.scrollHeight) + "px";
       refCell.scrollIntoView({ inline: "center", block: "nearest" });
     }
+    // Musicians count from 1, not 0 -- a raw "row 47" readout has no
+    // relationship to how a 4/4 bar actually feels. Convert to the
+    // standard Bar.Beat.Tick a tracker/DAW position display shows:
+    // bar and beat always start at 1, wrapping every 4 beats (one bar)
+    // and every rowsPerBeat rows (one beat) respectively.
+    const rpb = song.rowsPerBeat;
+    const rowsPerBar = rpb * 4;
+    const bar = Math.floor(last.row / rowsPerBar) + 1;
+    const beat = Math.floor((last.row % rowsPerBar) / rpb) + 1;
+    const tick = (last.row % rpb) + 1;
     $("#pos-display").textContent =
-      String(last.patIdx).padStart(2, "0") + "/" + String(last.row).padStart(2, "0");
+      "P" + (last.patIdx + 1) + " " + bar + "." + beat + "." + tick;
     renderOrderChips(song.order.length ? last.orderPos : null);
   }
   rafId = requestAnimationFrame(rafHighlight);
