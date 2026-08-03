@@ -781,6 +781,11 @@ grid.addEventListener("keydown", (e) => {
 
   // Copy / Paste Handling
   if (e.ctrlKey || e.metaKey) {
+    if (k.toLowerCase() === 'a') {
+      ui.selection = { r1: 0, c1: 0, r2: pat.rows - 1, c2: song.channels.length - 1 };
+      updateSelectionVisuals();
+      e.preventDefault(); return;
+    }
     if (k.toLowerCase() === 'c' && ui.selection) {
       const rMin = Math.min(ui.selection.r1, ui.selection.r2);
       const rMax = Math.max(ui.selection.r1, ui.selection.r2);
@@ -1279,6 +1284,39 @@ $("#btn-add-pattern").addEventListener("click", () => {
   refreshPatternSelect();
   renderGrid();
   autosave();
+});
+$("#btn-dup-pattern").addEventListener("click", () => {
+  // Deep copy so editing the duplicate never mutates the original --
+  // lands in the next free slot automatically since patterns are just
+  // an array and "Pat NN" labels are derived from index, not stored.
+  const copy = JSON.parse(JSON.stringify(curPat()));
+  song.patterns.push(copy);
+  ui.curPattern = song.patterns.length - 1;
+  refreshPatternSelect();
+  renderGrid();
+  autosave();
+  toast("Duplicated into Pat " + String(ui.curPattern).padStart(2, "0"));
+});
+$("#btn-rm-pattern").addEventListener("click", () => {
+  if (song.patterns.length <= 1) { toast("A song needs at least one pattern"); return; }
+  const removed = ui.curPattern;
+  if (!confirm("Delete Pat " + String(removed).padStart(2, "0") + "? This can't be undone.")) return;
+  song.patterns.splice(removed, 1);
+  // The arrangement order stores raw pattern indices -- removing a
+  // pattern shifts every later index down by one, and any order entry
+  // that pointed at the deleted pattern has to go too, or playback
+  // would silently point at the wrong pattern (or one that no longer
+  // exists) after this.
+  song.order = song.order
+    .filter((idx) => idx !== removed)
+    .map((idx) => (idx > removed ? idx - 1 : idx));
+  ui.curPattern = Math.min(removed, song.patterns.length - 1);
+  ui.selection = null;
+  refreshPatternSelect();
+  renderOrderChips(null);
+  renderGrid();
+  autosave();
+  toast("Deleted Pat " + String(removed).padStart(2, "0"));
 });
 $("#pattern-rows").addEventListener("change", () => {
   const v = parseInt($("#pattern-rows").value, 10);
