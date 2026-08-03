@@ -181,6 +181,15 @@
       <button id="em-fxapply" class="accent">Apply FX</button>
     </div>
     <div class="em-row">
+      <label class="em-lab">Speed</label>
+      <input id="em-speed" type="range" min="0.25" max="4" step="0.01" value="1">
+      <span id="em-speed-val" class="em-info">1.00x</span>
+      <label class="em-lab">Pitch</label>
+      <input id="em-pitch" type="range" min="-24" max="24" step="1" value="0">
+      <span id="em-pitch-val" class="em-info">0 st</span>
+      <button id="em-stretchapply" class="accent" title="Change speed and pitch independently — each only affects the other if you set both">Apply Speed/Pitch</button>
+    </div>
+    <div class="em-row">
       <button id="em-record">&#9679; Record</button>
       <button id="em-tomelody" title="Use this audio as the melody for AI generation">&#8594; Melody</button>
     </div>

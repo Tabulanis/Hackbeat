@@ -2744,6 +2744,54 @@ $("#em-reverse").addEventListener("click", emReverse);
 $("#em-gdown").addEventListener("click", () => emGain(-3));
 $("#em-gup").addEventListener("click", () => emGain(3));
 $("#em-fxapply").addEventListener("click", () => emApplyFx().catch((e) => toast(e.message)));
+
+/* speed/pitch: real time-stretch and pitch-shift (independent of each other),
+   not a naive resample — that always couples the two. Web Audio has no
+   built-in for this, so it round-trips to the server (librosa). */
+$("#em-speed").addEventListener("input", () => {
+  $("#em-speed-val").textContent = parseFloat($("#em-speed").value).toFixed(2) + "x";
+});
+$("#em-pitch").addEventListener("input", () => {
+  const v = parseFloat($("#em-pitch").value);
+  $("#em-pitch-val").textContent = (v > 0 ? "+" : "") + v + " st";
+});
+
+async function emApplyStretch() {
+  if (!em.buf) { toast("No audio loaded"); return; }
+  const rate = parseFloat($("#em-speed").value);
+  const semitones = parseFloat($("#em-pitch").value);
+  if (rate === 1 && semitones === 0) {
+    toast("Speed and pitch are both at default — nothing to apply");
+    return;
+  }
+  const blob = encodeWav(em.buf);
+  toast("Processing...");
+  let res;
+  try {
+    res = await fetch("/api/sample/stretch?rate=" + rate + "&semitones=" + semitones, {
+      method: "POST",
+      headers: { "Content-Type": "audio/wav" },
+      body: blob,
+    });
+  } catch (e) {
+    toast("Could not reach the server: " + e.message);
+    return;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    toast(data.detail || "Speed/pitch processing failed");
+    return;
+  }
+  const arr = await res.arrayBuffer();
+  const newBuf = await AC.decodeAudioData(arr);
+  emPushUndo();
+  em.buf = newBuf;
+  em.sel = null;
+  emDraw();
+  toast("Applied — speed " + rate.toFixed(2) + "x, pitch " +
+        (semitones > 0 ? "+" : "") + semitones + " semitones");
+}
+$("#em-stretchapply").addEventListener("click", () => emApplyStretch().catch((e) => toast(e.message)));
 $("#em-record").addEventListener("click", emToggleRecord);
 $("#em-tomelody").addEventListener("click", async () => {
   if (!em.buf) { toast("No audio loaded"); return; }

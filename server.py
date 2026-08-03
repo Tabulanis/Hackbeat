@@ -13,7 +13,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -97,6 +97,40 @@ async def save_sample(request: Request, path: str, overwrite: int = 0):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(body)
     return {"ok": True, "path": p.relative_to(SAMPLES).as_posix()}
+
+
+@app.post("/api/sample/stretch")
+async def stretch_sample(request: Request, rate: float = 1.0, semitones: float = 0.0):
+    """Change speed and pitch independently: rate re-times without touching
+    pitch, semitones re-pitches without touching duration/speed — the two
+    are applied as separate phase-vocoder passes (librosa), not a naive
+    resample (which would always change both together). Operates on
+    whatever WAV bytes are posted and returns processed WAV bytes directly
+    -- mirrors how Apply FX works client-side: edits the in-memory buffer,
+    doesn't touch disk until the user explicitly Saves/Replaces.
+    """
+    if rate <= 0:
+        raise HTTPException(status_code=400, detail="Rate must be positive")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+    try:
+        import io
+        import soundfile as sf
+        import librosa
+        data, sr = sf.read(io.BytesIO(body), dtype="float32", always_2d=True)
+        y = data.T  # soundfile gives (samples, channels); librosa wants (channels, samples)
+        if rate != 1.0:
+            y = librosa.effects.time_stretch(y, rate=rate)
+        if semitones != 0.0:
+            y = librosa.effects.pitch_shift(y, sr=sr, n_steps=semitones)
+        out_buf = io.BytesIO()
+        sf.write(out_buf, y.T, sr, format="WAV", subtype="PCM_16")
+        return Response(content=out_buf.getvalue(), media_type="audio/wav")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Speed/pitch processing failed: {str(e)[:300]}")
 
 
 @app.get("/api/projects")
