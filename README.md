@@ -60,8 +60,7 @@ recommended for generation; the core tracker doesn't need one at all.
 
 ## Status
 
-Actively being worked on. Screenshots and a proper demo are coming in a
-follow-up post — for now, the fastest way to see what it does is to run it.
+Actively being worked on. 
 
 ## License
 
