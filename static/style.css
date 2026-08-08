@@ -669,6 +669,9 @@ input[type="range"] {
   box-shadow: 0 -6px 22px rgba(0,0,0,.45);
 }
 #keyboard-dock.hidden { display: none; }
+
+/* preset picker sits in the voice card's header, opposite the name */
+.voice-preset { margin-left: auto; max-width: 10em; }
 #kb-bar {
   display: flex; align-items: center; gap: 6px; padding: 6px 8px;
   border-bottom: 1px solid #22262f;
