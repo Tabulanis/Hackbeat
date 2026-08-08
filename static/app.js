@@ -1537,6 +1537,109 @@ function fxUnit(title, fxObj, buildParams) {
   return unit;
 }
 
+/* ---- the instrument's own sound -------------------------------------
+   The voice engine can do a lot -- envelopes, filter, glide, looping --
+   and none of it is worth anything if there's no way to reach it. This is
+   that way: a preset to start from, and the handful of controls that
+   actually change how an instrument feels to play.
+
+   Settings live on the instrument, so they save with the song and a
+   plucky bass and a slow pad can sit in the same tune. */
+const fmtSec = (v) => (v < 1 ? Math.round(v * 1000) + "ms" : v.toFixed(2) + "s");
+
+function renderVoiceSection() {
+  const wrap = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "panel-section-title";
+  title.textContent = "INSTRUMENT VOICE";
+  wrap.appendChild(title);
+
+  const inst = song.instruments[ui.curInstrument];
+  if (!inst) {
+    const hint = document.createElement("div");
+    hint.className = "fx-hint";
+    hint.textContent = "Load a sample into an instrument slot to shape how it plays.";
+    wrap.appendChild(hint);
+    return wrap;
+  }
+
+  if (!inst.voice) inst.voice = Object.assign({}, HB_VOICES.DEFAULT_VOICE);
+  const v = inst.voice;
+
+  const unit = document.createElement("div");
+  unit.className = "fx-unit";
+  const head = document.createElement("div");
+  head.className = "fx-unit-head";
+  const who = document.createElement("span");
+  who.textContent = fmt2(ui.curInstrument + 1) + " " + (inst.name || "").toUpperCase();
+  head.appendChild(who);
+
+  // Presets first: most people want "make it a pad", not five numbers.
+  const preset = document.createElement("select");
+  preset.className = "voice-preset";
+  preset.title = "Start from a sound, then adjust";
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "preset…";
+  preset.appendChild(none);
+  for (const name of Object.keys(HB_VOICES.VOICE_PRESETS)) {
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    preset.appendChild(o);
+  }
+  preset.addEventListener("change", () => {
+    if (!preset.value) return;
+    // a preset replaces the whole voice, so leftovers from the previous
+    // one (a glide, a loop) don't quietly ride along
+    inst.voice = Object.assign({}, HB_VOICES.DEFAULT_VOICE,
+                               HB_VOICES.VOICE_PRESETS[preset.value]);
+    renderFxPanel();
+    autosave();
+    toast(preset.value);
+  });
+  head.appendChild(preset);
+  unit.appendChild(head);
+
+  const p = document.createElement("div");
+  p.className = "fx-params";
+  p.appendChild(fxParamRow("Attack", 0.001, 2, 0.001, v.attack, fmtSec, (x) => { v.attack = x; }));
+  p.appendChild(fxParamRow("Decay", 0, 2, 0.005, v.decay, fmtSec, (x) => { v.decay = x; }));
+  p.appendChild(fxParamRow("Sustain", 0, 1, 0.01, v.sustain,
+    (x) => Math.round(x * 100) + "%", (x) => { v.sustain = x; }));
+  p.appendChild(fxParamRow("Release", 0.005, 4, 0.005, v.release, fmtSec, (x) => { v.release = x; }));
+  p.appendChild(fxParamRow("Tone", 0.05, 1, 0.01, v.cutoff,
+    (x) => Math.round(x * 100) + "%", (x) => { v.cutoff = x; }));
+  p.appendChild(fxParamRow("Touch", 0, 1, 0.01, v.velToCutoff,
+    (x) => Math.round(x * 100) + "%", (x) => { v.velToCutoff = x; }));
+  p.appendChild(fxParamRow("Glide", 0, 0.5, 0.005, v.glide,
+    (x) => (x < 0.001 ? "off" : fmtSec(x)), (x) => { v.glide = x; }));
+  unit.appendChild(p);
+
+  // Looping is what lets a short sample be held as a pad rather than
+  // dying a tenth of a second after you press the key.
+  const loopRow = document.createElement("div");
+  loopRow.className = "fx-param";
+  const loopLab = document.createElement("label");
+  loopLab.textContent = "Hold";
+  const loopBtn = document.createElement("button");
+  loopBtn.className = "mini-btn";
+  loopBtn.textContent = v.loop ? "LOOPING" : "ONE SHOT";
+  loopBtn.addEventListener("click", () => {
+    v.loop = !v.loop;
+    loopBtn.textContent = v.loop ? "LOOPING" : "ONE SHOT";
+    autosave();
+  });
+  loopRow.append(loopLab, loopBtn);
+  unit.appendChild(loopRow);
+
+  const hint = document.createElement("div");
+  hint.className = "fx-hint";
+  hint.textContent = "Play the keyboard (♫ KEYS) to hear changes as you make them.";
+  unit.appendChild(hint);
+
+  wrap.appendChild(unit);
+  return wrap;
+}
+
 function renderFxPanel() {
   const ch = song.channels[ui.fxChannel];
   $("#fx-title").textContent = "MIX \u2014 " + ch.name.toUpperCase();
@@ -1558,6 +1661,9 @@ function renderFxPanel() {
   const cellBox = document.createElement("div");
   cellBox.id = "cell-inspector";
   body.appendChild(cellBox);
+
+  // --- INSTRUMENT VOICE ---
+  body.appendChild(renderVoiceSection());
 
   // --- CHANNEL STRIP ---
   const stripHeader = document.createElement("div");
@@ -2028,6 +2134,9 @@ function renderInstruments() {
     if (!missing) item.addEventListener("dblclick", () => openEditor(inst.path, inst.name));
     list.appendChild(item);
   });
+  // the voice card in the side panel belongs to the selected instrument,
+  // so it has to follow the selection
+  if ($("#fx-body") && $("#fx-body").childElementCount) renderFxPanel();
 }
 
 /* melody conditioning: hum/whistle -> instrument */
