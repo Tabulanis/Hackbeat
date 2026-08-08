@@ -658,3 +658,92 @@ input[type="range"] {
   padding: 4px 6px;
   font-size: 11px;
 }
+
+/* =====================================================================
+   The playable keyboard
+   ===================================================================== */
+#keyboard-dock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: #14161d; border-top: 1px solid #2a2f3c;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -6px 22px rgba(0,0,0,.45);
+}
+#keyboard-dock.hidden { display: none; }
+#kb-bar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-bottom: 1px solid #22262f;
+}
+#kb-bar .spacer { flex: 1; }
+#kb-oct { font-variant-numeric: tabular-nums; min-width: 1.4em; text-align: center; }
+#kb-live.armed { background: #c0392b; color: #fff; border-color: #e05c4a; }
+
+.piano {
+  display: grid;
+  grid-template-columns: repeat(var(--whites, 14), 1fr);
+  grid-template-rows: 62% 38%;
+  height: 128px; touch-action: none; user-select: none;
+  background: #0d0f14;
+}
+.pk {
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: 5px; font-size: 10px; cursor: pointer;
+}
+.pk.white {
+  grid-row: 1 / 3;
+  background: #e9edf5; color: #2a2f3c;
+  border: 1px solid #98a0b0; border-radius: 0 0 5px 5px;
+}
+.pk.black {
+  grid-row: 1 / 2; z-index: 2;
+  background: #1e222c; color: #aab; border: 1px solid #0a0c10;
+  border-radius: 0 0 4px 4px;
+  /* straddle the gap between the two whites it sits between */
+  margin-left: 62%; margin-right: -28%;
+}
+.pk.white.on  { background: #7fd4ff; }
+.pk.black.on  { background: #3a86b8; }
+
+/* =====================================================================
+   Phones and tablets. The tracker grid is inherently wide, so it scrolls
+   sideways rather than being crushed — but everything AROUND it stacks,
+   and the keyboard gets the bottom of the screen where a thumb lives.
+   ===================================================================== */
+@media (max-width: 820px) {
+  #topbar {
+    flex-wrap: wrap; gap: 4px 8px; padding: 6px 8px;
+    position: sticky; top: 0; z-index: 30;
+  }
+  #topbar .brand { font-size: 13px; }
+  #topbar .ctl { gap: 4px; }
+  #topbar .ctl label { font-size: 10px; }
+  #topbar .spacer { display: none; }
+  #topbar button, #topbar select, #topbar input {
+    min-height: 38px; font-size: 14px;
+  }
+  #topbar input[type="number"] { width: 4.2em; }
+
+  #workspace { flex-direction: column; }
+  #palette {
+    width: auto; max-height: 34vh; order: 2;
+    border-right: 0; border-top: 1px solid #2a2f3c;
+  }
+  #grid-wrap, #grid { min-width: 0; }
+
+  /* Keep the pattern visible above the docked keyboard. The height is
+     measured and set by initKeyboard rather than guessed here -- the bar
+     above the keys wraps to two lines on a narrow phone, and a hardcoded
+     figure leaves the bottom rows hidden underneath. */
+  body:has(#keyboard-dock:not(.hidden)) #workspace {
+    padding-bottom: var(--kb-height, 178px);
+  }
+
+  .piano { height: 152px; }
+  .pk { font-size: 11px; }
+  /* bigger tap targets everywhere it counts */
+  button, select { min-height: 38px; }
+}
+
+@media (max-width: 520px) {
+  #topbar .brand { display: none; }
+  .piano { height: 168px; }
+}

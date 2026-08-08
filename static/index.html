@@ -33,6 +33,7 @@
   </div>
   <div class="ctl">
     <button id="btn-edit" class="toggled" title="When on, note keys write into the pattern">REC</button>
+    <button id="btn-keys" title="Show the playable keyboard">&#9835; KEYS</button>
   </div>
   <div class="ctl">
     <button id="btn-wave" class="toggled" title="Waveform ribbons in the pattern grid">WAVE</button>
@@ -143,6 +144,26 @@
   </aside>
 
 </main>
+
+<!-- The instrument. Hidden until you ask for it on desktop (the computer
+     keys are faster there); shown by default on a phone, which has none. -->
+<div id="keyboard-dock" class="hidden">
+  <div id="kb-bar">
+    <button id="kb-oct-down" title="Lower octave">&#9660; Oct</button>
+    <span id="kb-oct">4</span>
+    <button id="kb-oct-up" title="Higher octave">&#9650; Oct</button>
+    <button id="kb-live" title="Record what you play into the pattern while it rolls">&#9679; Live</button>
+    <select id="kb-quant" title="Snap recorded notes to a grid">
+      <option value="1">snap 1 row</option>
+      <option value="2">snap 2 rows</option>
+      <option value="4">snap 4 rows</option>
+      <option value="0">no snap</option>
+    </select>
+    <span class="spacer"></span>
+    <button id="kb-close" title="Hide the keyboard">&#10005;</button>
+  </div>
+  <div id="piano-host"></div>
+</div>
 
 <div id="em-overlay" hidden>
   <div id="em-box">
@@ -539,6 +560,8 @@
 
 <div id="toast"></div>
 
+<script src="voices.js"></script>
+<script src="piano.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

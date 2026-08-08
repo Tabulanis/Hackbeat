@@ -724,8 +724,10 @@ function setCursor(row, ch, sub, slot) {
   renderCellInspector();
 }
 
-function getOrMakeCell(r, c) {
-  const pat = curPat();
+/** patIdx is optional: live recording in song mode can be writing into a
+ *  pattern other than the one on screen. */
+function getOrMakeCell(r, c, patIdx) {
+  const pat = patIdx != null ? song.patterns[patIdx] : curPat();
   if (!pat.data[r][c]) pat.data[r][c] = { note: null, inst: null, vol: null };
   return pat.data[r][c];
 }
@@ -797,6 +799,19 @@ function cycleSplit(row, ch) {
 }
 
 /* ================= keyboard entry ================= */
+/* Key up releases the note. Without this the envelope's release stage can
+   never fire and every note runs to the end of its sample, which is what
+   made the old keyboard feel like a xylophone rather than an instrument. */
+grid.addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  if (KEYMAP[k] == null) return;
+  const midi = ui.octave * 12 + KEYMAP[k];
+  keyjazzOff(midi, ui.cursor.ch);
+  if (piano) piano.highlight(midi, false);
+});
+/* Leaving the window with keys down would otherwise leave notes stuck on. */
+window.addEventListener("blur", () => { pool.allOff(null); if (piano) piano.allOff(); });
+
 grid.addEventListener("keydown", (e) => {
   const k = e.key;
   const cur = ui.cursor;
@@ -969,7 +984,9 @@ grid.addEventListener("keydown", (e) => {
   if (cur.sub === 0 && KEYMAP[k.toLowerCase()] != null) {
     const midi = ui.octave * 12 + KEYMAP[k.toLowerCase()];
     if (midi <= 119) {
-      keyjazz(midi, cur.ch);
+      keyjazz(midi, cur.ch, 0.85);
+      if (piano) piano.highlight(midi, true);
+      liveRecordNote(midi);
       if (ui.editMode) {
         const cell = getOrMakeCell(cur.row, cur.ch);
         if (cell.split) {
@@ -1012,18 +1029,97 @@ grid.addEventListener("keydown", (e) => {
   }
 });
 
-function keyjazz(midi, chIdx) {
+/* The live instrument — everything you play by hand goes through here.
+   Was: start a buffer and walk away, with no way to stop it and one
+   volume for every note. Now every note is a Voice with an envelope and
+   a velocity, and letting go of the key actually releases it. */
+const pool = new HB_VOICES.VoicePool(AC);
+
+function keyjazz(midi, chIdx, velocity) {
   const inst = song.instruments[ui.curInstrument];
-  if (!inst) return;
+  if (!inst) return null;
   const buf = buffers.get(inst.path);
-  if (!buf) return;
+  if (!buf) return null;
   AC.resume();
   ensureChains();
-  const src = AC.createBufferSource();
-  src.buffer = buf;
-  src.playbackRate.value = Math.pow(2, (midi - BASE_NOTE) / 12);
-  src.connect(chains[chIdx].input);
-  src.start();
+  const settings = HB_VOICES.voiceSettings(inst);
+
+  // With glide set, slide from whatever is already sounding on this channel
+  // instead of retriggering — the difference between a lead and a xylophone.
+  if (settings.glide > 0.001) {
+    for (const [k, v] of pool.held) {
+      if (v.channel === chIdx && !v.released) {
+        v.glideTo(midi, BASE_NOTE, settings.glide);
+        pool.held.delete(k);
+        pool.held.set(HB_VOICES.VoicePool.key(chIdx, midi), v);
+        return v;
+      }
+    }
+  }
+
+  return pool.noteOn({
+    buffer: buf, midi, channel: chIdx, baseNote: BASE_NOTE,
+    velocity: velocity != null ? velocity : 0.85,
+    settings, destination: chains[chIdx].input,
+  });
+}
+
+function keyjazzOff(midi, chIdx) {
+  pool.noteOff(chIdx, midi);
+}
+
+/* ---- where is the song right now? -----------------------------------
+   playState.queue holds rows already SCHEDULED, which run ahead of what
+   you can hear. The audible row is the last one whose time has passed —
+   the same trick rafHighlight uses to move the playline. Live recording
+   has to use the audible row, or every note lands early. */
+function audibleRow() {
+  if (!playState) return null;
+  const now = AC.currentTime;
+  // rafHighlight shifts rows off the queue as they become audible, so the
+  // queue holds only the future -- the row we can hear is the one it last
+  // drained. The loop is the fallback for the gap before the first frame.
+  let best = playState.audible || null;
+  for (const q of playState.queue) {
+    if (q.time <= now) best = q; else break;
+  }
+  if (!best) return null;
+  const spr = secPerRow();
+  return { patIdx: best.patIdx, row: best.row,
+           frac: Math.max(0, Math.min(1, (now - best.time) / spr)) };
+}
+
+/* ---- live recording -------------------------------------------------
+   Play along while the song rolls and what you play lands in the pattern.
+   Step entry can't capture timing; this can. Quantise is on by default
+   because a tracker row IS a grid — an unquantised take just lands on
+   whatever row happened to be under your finger. */
+const liveRec = { on: false, quantize: 1 };
+
+function liveRecordNote(midi) {
+  if (!liveRec.on || !playState) return;
+  const pos = audibleRow();
+  if (!pos) return;
+  const pat = song.patterns[pos.patIdx];
+  if (!pat) return;
+  let row = pos.row;
+  if (liveRec.quantize > 0) {
+    // a note played a hair late still belongs to the row it was aimed at
+    const q = liveRec.quantize;
+    row = Math.round((pos.row + pos.frac) / q) * q;
+    if (row >= pat.rows) row = 0;      // wrap, since the pattern loops
+  }
+  const ch = ui.cursor.ch;
+  if (!pat.data[row]) return;
+  // An empty cell IS null in a pattern, and recording lands on empty cells
+  // almost every time -- it has to make the cell, the same way typing a note
+  // in does, or a take silently records nothing.
+  const cell = getOrMakeCell(row, ch, pos.patIdx);
+  const inst = song.instruments.length ? ui.curInstrument + 1 : null;
+  if (cell.split) cell.subs[0] = { note: midi, inst, vol: null };
+  else { cell.note = midi; cell.inst = inst; }
+  if (pos.patIdx === ui.curPattern) repaintCell(row, ch);
+  autosave();
 }
 
 /* ================= playback scheduler ================= */
@@ -1089,6 +1185,10 @@ function rafHighlight() {
   while (playState.queue.length && playState.queue[0].time <= now) {
     last = playState.queue.shift();
   }
+  // Draining the queue destroys the only record of where the song actually
+  // is -- everything left in it is still in the future. Keep the last row
+  // that became audible so live recording knows what row you played over.
+  if (last) playState.audible = last;
   if (last) {
     if (last.patIdx !== ui.curPattern) {
       ui.curPattern = last.patIdx;
@@ -3062,3 +3162,92 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
   await refreshProjectList();
   grid.focus();
 })();
+
+
+/* =====================================================================
+   The playable keyboard
+   ===================================================================== */
+let piano = null;
+
+function noteOnFromPiano(midi, velocity) {
+  const ch = ui.cursor.ch;
+  keyjazz(midi, ch, velocity);
+  liveRecordNote(midi);
+  // With REC armed and the song stopped, tapping a key writes the note
+  // where the cursor is — the same as typing it, but playable.
+  if (!playState && ui.editMode) {
+    const cell = getOrMakeCell(ui.cursor.row, ch);
+    cell.note = midi;
+    cell.inst = song.instruments.length ? ui.curInstrument + 1 : null;
+    repaintCell(ui.cursor.row, ch);
+    setCursor(ui.cursor.row + 1, ch, 0, 0);
+    autosave();
+  }
+}
+
+function noteOffFromPiano(midi) {
+  keyjazzOff(midi, ui.cursor.ch);
+}
+
+function initKeyboard() {
+  const host = $("#piano-host");
+  if (!host) return;
+  piano = new HB_PIANO.Piano(host, {
+    octaves: () => (window.matchMedia("(max-width: 700px)").matches ? 1 : 2),
+    getOctave: () => ui.octave,
+    onNoteOn: noteOnFromPiano,
+    onNoteOff: noteOffFromPiano,
+  });
+
+  const dock = $("#keyboard-dock");
+  const show = (on) => {
+    dock.classList.toggle("hidden", !on);
+    $("#btn-keys").classList.toggle("toggled", on);
+    if (on) piano.refresh();
+    // reserve exactly the space the keyboard occupies, measured after it
+    // has laid out, so the last pattern rows never hide behind it
+    requestAnimationFrame(() => {
+      document.documentElement.style.setProperty(
+        "--kb-height", (on ? dock.offsetHeight : 0) + "px");
+    });
+  };
+  $("#btn-keys").addEventListener("click", () => show(dock.classList.contains("hidden")));
+  $("#kb-close").addEventListener("click", () => show(false));
+
+  const setOct = (d) => {
+    ui.octave = Math.max(1, Math.min(8, ui.octave + d));
+    const oi = $("#octave");
+    if (oi) oi.value = ui.octave;
+    $("#kb-oct").textContent = ui.octave;
+    piano.refresh();
+  };
+  $("#kb-oct-down").addEventListener("click", () => setOct(-1));
+  $("#kb-oct-up").addEventListener("click", () => setOct(1));
+  $("#kb-oct").textContent = ui.octave;
+
+  $("#kb-live").addEventListener("click", () => {
+    liveRec.on = !liveRec.on;
+    $("#kb-live").classList.toggle("armed", liveRec.on);
+    toast(liveRec.on
+      ? "Live record ON — press play and anything you play lands in the pattern"
+      : "Live record off");
+  });
+  $("#kb-quant").addEventListener("change", (e) => {
+    liveRec.quantize = Number(e.target.value);
+  });
+
+  // Turning the phone sideways should give you more keys, not wider ones.
+  let rebuildTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => {
+      if (!dock.classList.contains("hidden")) show(true);
+    }, 150);
+  });
+
+  // A phone has no computer keyboard, so the on-screen one IS the
+  // instrument there — open it without being asked.
+  if (window.matchMedia("(pointer: coarse)").matches) show(true);
+}
+
+initKeyboard();
