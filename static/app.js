@@ -80,6 +80,7 @@ const ui = {
   clipboard: null,
   octave: 5,
   editMode: true,
+  eraser: false,
   fxChannel: 0,
   showWave: true,
   showVU: true,
@@ -598,6 +599,15 @@ function renderGrid() {
         const slot = e.target.dataset && e.target.dataset.slot != null
           ? Number(e.target.dataset.slot) : 0;
 
+        // Eraser mode: the tap IS the delete — no cursor moves, no
+        // double-tap tricks. The only touch path to removing a note.
+        if (ui.eraser) {
+          eraseCell(r, i, e.target.dataset && e.target.dataset.slot != null
+            ? Number(e.target.dataset.slot) : null);
+          e.preventDefault();
+          return;
+        }
+
         /* manual double-click: the first click repaints the cell, which
            destroys the original click target, so native dblclick never
            fires. Two clicks on the same cell within 350ms = split cycle. */
@@ -654,6 +664,31 @@ function renderGrid() {
   scheduleWaveDraw();
   renderCellInspector();
 }
+
+/* One tap deletes one cell (or one slot of a split cell) — same rules as
+   the Delete key, minus the keyboard a phone doesn't have. */
+function eraseCell(r, c, slot) {
+  const pat = curPat();
+  const cell = pat.data[r][c];
+  if (!cell) return;
+  if (cell.split && cell.subs && slot != null) {
+    cell.subs[slot] = null;
+    if (cell.subs.every((sub) => !sub)) pat.data[r][c] = null;
+  } else {
+    pat.data[r][c] = null;
+  }
+  repaintCell(r, c);
+  scheduleWaveDraw();
+  renderCellInspector();
+  autosave();
+}
+
+$("#btn-eraser").addEventListener("click", () => {
+  ui.eraser = !ui.eraser;
+  $("#btn-eraser").classList.toggle("toggled", ui.eraser);
+  grid.classList.toggle("erasing", ui.eraser);
+  toast(ui.eraser ? "Eraser on — tap any note to delete it" : "Eraser off");
+});
 
 function paintCell(el, cell, r, c) {
   el.innerHTML = "";
@@ -1123,8 +1158,24 @@ function liveRecordNote(midi) {
 }
 
 /* ================= playback scheduler ================= */
-let playState = null; 
-const channelActive = {}; 
+let playState = null;
+const channelActive = {};
+
+/* Stopping a buffer source dead leaves the speaker cone wherever the wave
+   happened to be — an audible pop, worst on bass notes whose wave is far
+   from zero most of the time. Ten milliseconds to silence first is below
+   what the ear hears as a fade but removes the pop entirely. */
+const DECLICK = 0.012;
+function fadeStop(active, t) {
+  if (!active) return;
+  try {
+    const g = active.vg.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(0, t + DECLICK);
+  } catch (_) {}
+  try { active.src.stop(t + DECLICK + 0.005); } catch (_) {}
+}
 
 function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
   const pat = song.patterns[patIdx];
@@ -1133,8 +1184,8 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
     for (const ev of cellEvents(pat.data[row][c])) {
       const t = time + ev.frac * spr;
       if (ev.note === NOTE_OFF) {
-        const prev = activeMap[c];
-        if (prev) { try { prev.stop(t); } catch (_) {} activeMap[c] = null; }
+        fadeStop(activeMap[c], t);
+        activeMap[c] = null;
         continue;
       }
       const instNum = ev.inst != null ? ev.inst : ui.curInstrument + 1;
@@ -1142,8 +1193,7 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
       if (!inst) continue;
       const buf = buffers.get(inst.path);
       if (!buf) continue;
-      const prev = activeMap[c];
-      if (prev) { try { prev.stop(t); } catch (_) {} }
+      fadeStop(activeMap[c], t);
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.playbackRate.value = Math.pow(2, (ev.note - BASE_NOTE) / 12);
@@ -1152,7 +1202,7 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
       src.connect(vg);
       vg.connect(chainSet[c].input);
       src.start(t);
-      activeMap[c] = src;
+      activeMap[c] = { src, vg };
     }
   }
 }
@@ -1252,8 +1302,7 @@ function stopPlayback() {
   }
   cancelAnimationFrame(rafId);
   for (const k of Object.keys(channelActive)) {
-    const s = channelActive[k];
-    if (s) { try { s.stop(); } catch (_) {} }
+    fadeStop(channelActive[k], AC.currentTime);
     channelActive[k] = null;
   }
   if (playline) playline.style.display = "none";
@@ -2171,7 +2220,7 @@ $("#gen-hum").addEventListener("click", async () => {
     return;
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await openAudioInput();
     const chunks = [];
     const rec = new MediaRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
@@ -3013,6 +3062,61 @@ function emStop() {
   if (em.playSrc) { try { em.playSrc.stop(); } catch (_) {} em.playSrc = null; }
 }
 
+/* ================= audio input (mic / line-in / USB interface) =========
+   The browser's default recording settings are tuned for video calls:
+   echo cancellation, noise suppression, and auto-gain. All three mangle
+   music — noise suppression eats sustained notes, auto-gain flattens
+   dynamics. A music app records raw.
+   Any USB mic or audio interface the OS can see shows up as a choice in
+   the picker; the choice is remembered and shared by every recorder. */
+let inputDeviceId = localStorage.getItem("hackbeat_input_device") || "";
+
+async function openAudioInput() {
+  const audio = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+  };
+  // "ideal", not "exact": if the chosen device got unplugged, fall back
+  // to the default input instead of refusing to record at all
+  if (inputDeviceId) audio.deviceId = { ideal: inputDeviceId };
+  const stream = await navigator.mediaDevices.getUserMedia({ audio });
+  refreshInputPicker(); // device labels only become visible after permission
+  return stream;
+}
+
+async function refreshInputPicker() {
+  const sel = $("#input-device");
+  if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let devs = [];
+  try { devs = await navigator.mediaDevices.enumerateDevices(); } catch (_) { return; }
+  sel.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = "Default input";
+  sel.appendChild(def);
+  for (const d of devs) {
+    if (d.kind !== "audioinput" || !d.deviceId || d.deviceId === "default") continue;
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label || "Input " + sel.options.length;
+    sel.appendChild(o);
+  }
+  sel.value = [...sel.options].some((o) => o.value === inputDeviceId) ? inputDeviceId : "";
+}
+
+if ($("#input-device")) {
+  $("#input-device").addEventListener("change", (e) => {
+    inputDeviceId = e.target.value;
+    localStorage.setItem("hackbeat_input_device", inputDeviceId);
+  });
+  refreshInputPicker();
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    // plugging in a mic mid-session should show up without a reload
+    navigator.mediaDevices.addEventListener("devicechange", refreshInputPicker);
+  }
+}
+
 /* mic recording */
 async function emToggleRecord() {
   const btn = $("#em-record");
@@ -3022,7 +3126,7 @@ async function emToggleRecord() {
     return;
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await openAudioInput();
     const chunks = [];
     const rec = new MediaRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
@@ -3360,3 +3464,48 @@ function initKeyboard() {
 }
 
 initKeyboard();
+
+/* =====================================================================
+   Hardware MIDI — plug a USB keyboard or pad controller straight in.
+
+   A MIDI instrument sends exactly what the on-screen piano sends: note
+   number plus how hard it was hit. So hardware notes go through the very
+   same functions, and live play, velocity, live-record, and step entry
+   all come along for free. Devices can be plugged in mid-session.
+   (No Web MIDI on iPads — Apple's browser engine doesn't allow it.)
+   ===================================================================== */
+function initMIDI() {
+  if (!navigator.requestMIDIAccess) return;
+  navigator.requestMIDIAccess().then((access) => {
+    const wire = (input) => {
+      input.onmidimessage = (e) => {
+        if (!e.data || e.data.length < 3) return; // ignore clock/sysex chatter
+        const cmd = e.data[0] & 0xf0;
+        const note = e.data[1];
+        const vel = e.data[2];
+        if (cmd === 0x90 && vel > 0) {
+          AC.resume();
+          noteOnFromPiano(note, vel / 127);
+          if (piano) piano.highlight(note, true);
+        } else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) {
+          noteOffFromPiano(note);
+          if (piano) piano.highlight(note, false);
+        }
+      };
+    };
+    for (const input of access.inputs.values()) wire(input);
+    const names = [...access.inputs.values()].map((i) => i.name).filter(Boolean);
+    if (names.length) toast("MIDI in: " + names.join(", "));
+    access.onstatechange = (e) => {
+      const p = e.port;
+      if (!p || p.type !== "input") return;
+      if (p.state === "connected") {
+        wire(p);
+        toast("MIDI connected: " + (p.name || "device"));
+      } else if (p.state === "disconnected") {
+        toast("MIDI unplugged: " + (p.name || "device"));
+      }
+    };
+  }).catch(() => {}); // permission denied — everything else still works
+}
+initMIDI();

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hackbeat</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260808b">
 </head>
 <body>
 
@@ -34,6 +34,7 @@
   <div class="ctl">
     <button id="btn-edit" class="toggled" title="When on, note keys write into the pattern">REC</button>
     <button id="btn-keys" title="Show the playable keyboard">&#9835; KEYS</button>
+    <button id="btn-eraser" title="Eraser &mdash; tap notes in the grid to delete them">&#9003; ERASE</button>
   </div>
   <div class="ctl">
     <button id="btn-wave" class="toggled" title="Waveform ribbons in the pattern grid">WAVE</button>
@@ -215,6 +216,7 @@
     </div>
     <div class="em-row">
       <button id="em-record">&#9679; Record</button>
+      <select id="input-device" title="Which mic or input to record from"></select>
       <button id="em-tomelody" title="Use this audio as the melody for AI generation">&#8594; Melody</button>
     </div>
     <div class="em-row">
@@ -560,8 +562,8 @@
 
 <div id="toast"></div>
 
-<script src="voices.js"></script>
-<script src="piano.js"></script>
-<script src="app.js"></script>
+<script src="voices.js?v=20260808b"></script>
+<script src="piano.js?v=20260808b"></script>
+<script src="app.js?v=20260808b"></script>
 </body>
 </html>

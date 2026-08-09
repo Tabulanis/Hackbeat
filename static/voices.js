@@ -128,10 +128,21 @@ class Voice {
     this.src.onended = () => this.dispose();
   }
 
-  /** Cut immediately — for voice stealing, where a fade would still pile up. */
+  /** Cut fast — for voice stealing. "Fast" still means a 10ms fade: a true
+      instant stop leaves the wave mid-swing and pops, loudest on bass. */
   kill() {
-    try { this.src.stop(); } catch (_) {}
-    this.dispose();
+    const t = this.ctx.currentTime;
+    const g = this.amp.gain;
+    try {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(Math.max(0.0001, g.value), t);
+      g.exponentialRampToValueAtTime(0.0001, t + 0.01);
+      this.src.stop(t + 0.02);
+      this.src.onended = () => this.dispose();
+    } catch (_) {
+      try { this.src.stop(); } catch (_) {}
+      this.dispose();
+    }
   }
 
   dispose() {
