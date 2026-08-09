@@ -53,6 +53,11 @@ button.accent {
   font-weight: 600;
 }
 button.toggled { background: #6b5a1f; border-color: var(--amber); color: #ffe0a8; }
+/* Eraser is destructive, so its "on" state is red, not the usual amber —
+   you should never wonder whether tapping will delete something. */
+#btn-eraser.toggled { background: #7a2a22; border-color: #e05c4a; color: #ffd7d0; }
+#pattern-grid.erasing .pcell { cursor: crosshair; }
+#pattern-grid.erasing .pcell.has-note { outline: 1px dashed rgba(224, 92, 74, 0.5); outline-offset: -1px; }
 input, select {
   background: #101216;
   color: var(--ink);
