@@ -80,6 +80,7 @@ const ui = {
   clipboard: null,
   octave: 5,
   editMode: true,
+  stepMode: false,   // STEP: advance the cursor after each note written
   eraser: false,
   fxChannel: 0,
   showWave: true,
@@ -762,6 +763,16 @@ function setCursor(row, ch, sub, slot) {
 
 /** patIdx is optional: live recording in song mode can be writing into a
  *  pattern other than the one on screen. */
+
+/* After a note is written: in STEP mode the cursor hops to the next slot
+   (or the next row); otherwise it stays put so you can re-take the same
+   note until it's right. */
+function advanceAfterWrite(row, ch, slot, split) {
+  if (!ui.stepMode) return;
+  if (split && slot < split - 1) setCursor(row, ch, 0, slot + 1);
+  else setCursor(row + 1, ch, 0, 0);
+}
+
 function getOrMakeCell(r, c, patIdx) {
   const pat = patIdx != null ? song.patterns[patIdx] : curPat();
   if (!pat.data[r][c]) pat.data[r][c] = { note: null, inst: null, vol: null };
@@ -1003,12 +1014,11 @@ grid.addEventListener("keydown", (e) => {
       if (cell.split) {
         cell.subs[cur.slot] = { note: NOTE_OFF, inst: null, vol: null };
         repaintCell(cur.row, cur.ch);
-        if (cur.slot < cell.split - 1) setCursor(cur.row, cur.ch, 0, cur.slot + 1);
-        else setCursor(cur.row + 1, cur.ch, 0, 0);
+        advanceAfterWrite(cur.row, cur.ch, cur.slot, cell.split);
       } else {
         cell.note = NOTE_OFF; cell.inst = null; cell.vol = null;
         repaintCell(cur.row, cur.ch);
-        setCursor(cur.row + 1, cur.ch, 0);
+        advanceAfterWrite(cur.row, cur.ch, 0, 0);
       }
       scheduleWaveDraw();
       autosave();
@@ -1032,13 +1042,12 @@ grid.addEventListener("keydown", (e) => {
             vol: null,
           };
           repaintCell(cur.row, cur.ch);
-          if (cur.slot < cell.split - 1) setCursor(cur.row, cur.ch, 0, cur.slot + 1);
-          else setCursor(cur.row + 1, cur.ch, 0, 0);
+          advanceAfterWrite(cur.row, cur.ch, cur.slot, cell.split);
         } else {
           cell.note = midi;
           cell.inst = song.instruments.length ? ui.curInstrument + 1 : null;
           repaintCell(cur.row, cur.ch);
-          setCursor(cur.row + 1, cur.ch, 0);
+          advanceAfterWrite(cur.row, cur.ch, 0, 0);
         }
         scheduleWaveDraw();
         autosave();
@@ -3436,6 +3445,16 @@ function setSimple(on) {
   localStorage.setItem(SIMPLE_KEY, on ? "1" : "0");
 }
 setSimple(localStorage.getItem(SIMPLE_KEY) !== "0");
+ui.stepMode = localStorage.getItem("hackbeat_step") === "1";
+$("#btn-step").classList.toggle("toggled", ui.stepMode);
+$("#btn-step").addEventListener("click", () => {
+  ui.stepMode = !ui.stepMode;
+  $("#btn-step").classList.toggle("toggled", ui.stepMode);
+  localStorage.setItem("hackbeat_step", ui.stepMode ? "1" : "0");
+  toast(ui.stepMode ? "Step record ON — each note moves the cursor forward"
+                    : "Step record off — cursor stays where you put it");
+});
+
 $("#btn-simple").addEventListener("click", () => {
   const on = !document.body.classList.contains("simple");
   setSimple(on);
@@ -3497,7 +3516,7 @@ function noteOnFromPiano(midi, velocity) {
     cell.note = midi;
     cell.inst = song.instruments.length ? ui.curInstrument + 1 : null;
     repaintCell(ui.cursor.row, ch);
-    setCursor(ui.cursor.row + 1, ch, 0, 0);
+    advanceAfterWrite(ui.cursor.row, ch, 0, 0);
     autosave();
   }
 }
