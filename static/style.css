@@ -836,5 +836,18 @@ body:has(#keyboard-dock:not(.hidden)) #workspace {
   padding-bottom: var(--kb-height, 178px);
 }
 
-/* topbar input picker stays small so the transport doesn't crowd */
-#input-device-top { max-width: 140px; }
+/* SING input popover */
+#input-popover {
+  position: fixed;
+  top: 44px;
+  left: 180px;
+  z-index: 45;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  max-width: 320px;
+}
+.input-pop-head { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--dim); margin-bottom: 6px; }
+.input-pop-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 0; cursor: pointer; color: var(--ink); }
