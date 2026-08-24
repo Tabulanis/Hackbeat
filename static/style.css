@@ -828,14 +828,8 @@ body.simple #topbar .ctl:has(#octave),
 body.simple #topbar .ctl:has(#btn-wave),
 body.simple #topbar .ctl:has(#zoom-in),
 body.simple #topbar .ctl:has(#pattern-select),
-body.simple #topbar .ctl:has(#btn-add-channel),
-body.simple #topbar .ctl:has(#btn-rm-channel),
 body.simple #order-bar,
-body.simple #gen-panel,
-body.simple #fx-panel,
-body.simple #btn-refresh,
-body.simple #btn-rec,
-body.simple .strip-btn { display: none !important; }
+
 
 /* the grid keeps scrolling above the docked keyboard, on any screen size */
 body:has(#keyboard-dock:not(.hidden)) #workspace {
