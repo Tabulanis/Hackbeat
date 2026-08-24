@@ -828,7 +828,7 @@ body.simple #topbar .ctl:has(#octave),
 body.simple #topbar .ctl:has(#btn-wave),
 body.simple #topbar .ctl:has(#zoom-in),
 body.simple #topbar .ctl:has(#pattern-select),
-body.simple #order-bar,
+body.simple #order-bar { display: none !important; }
 
 
 /* the grid keeps scrolling above the docked keyboard, on any screen size */
