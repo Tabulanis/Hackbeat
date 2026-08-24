@@ -28,6 +28,7 @@ function chTint(c, a) {
 
 function defaultFx() {
   return {
+    nudge: 0,   // ms; slides this channel's notes earlier (-) or later (+) at playback
     vol: 0.85,
     pan: 0.0,
     eq: { low: 0, mid: 0, high: 0 },
@@ -1193,7 +1194,8 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
   const spr = secPerRow();
   for (let c = 0; c < song.channels.length; c++) {
     for (const ev of cellEvents(pat.data[row][c])) {
-      const t = time + ev.frac * spr;
+      // per-channel nudge: lines up takes whose mic heard things a hair late/early
+      const t = time + ev.frac * spr + ((song.channels[c].fx.nudge || 0) / 1000);
       if (ev.note === NOTE_OFF) {
         fadeStop(activeMap[c], t);
         activeMap[c] = null;
@@ -1709,6 +1711,7 @@ function renderFxPanel() {
 
   // Ensure new properties exist for older saves
   if (fx.pan === undefined) fx.pan = 0;
+  if (fx.nudge === undefined) fx.nudge = 0;
   if (!fx.eq) fx.eq = { low: 0, mid: 0, high: 0 };
   if (!fx.crush) fx.crush = { on: false, bits: 8 };
   if (!fx.chorus) fx.chorus = { on: false, rate: 1.5, depth: 0.01, mix: 0.5 };
@@ -1740,6 +1743,8 @@ function renderFxPanel() {
   volParams.appendChild(fxParamRow("Pan", -1, 1, 0.01, fx.pan,
     (v) => v === 0 ? "C" : (v < 0 ? "L" + Math.round(-v*100) : "R" + Math.round(v*100)), 
     (v) => { fx.pan = v; }));
+  volParams.appendChild(fxParamRow("Nudge", -200, 200, 1, fx.nudge,
+    (v) => (v > 0 ? "+" : "") + v + "ms", (v) => { fx.nudge = v; }));
   volUnit.appendChild(volParams);
   body.appendChild(volUnit);
 
@@ -3102,7 +3107,7 @@ function newRecorder(stream) {
   return new MediaRecorder(stream, { audioBitsPerSecond: 256000 });
 }
 
-async function openAudioInput() {
+async function openAudioInput(devId = inputDeviceId) {
   const audio = {
     echoCancellation: false,
     noiseSuppression: false,
@@ -3114,7 +3119,7 @@ async function openAudioInput() {
   };
   // "ideal", not "exact": if the chosen device got unplugged, fall back
   // to the default input instead of refusing to record at all
-  if (inputDeviceId) audio.deviceId = { ideal: inputDeviceId };
+  if (devId) audio.deviceId = { ideal: devId };
   const stream = await navigator.mediaDevices.getUserMedia({ audio });
   refreshInputPicker(); // device labels only become visible after permission
   return stream;
@@ -3141,6 +3146,61 @@ async function refreshInputPicker() {
     sel.value = [...sel.options].some((o) => o.value === inputDeviceId) ? inputDeviceId : "";
   }
 }
+
+/* Which inputs SING records — array of deviceIds; empty = system default.
+   Lives next to the single-choice picker the sample editor keeps using. */
+let singInputs = [];
+try { singInputs = JSON.parse(localStorage.getItem("hackbeat_sing_inputs") || "[]"); } catch (_) {}
+
+function singInputLabel() {
+  $("#btn-inputs").textContent = "\uD83C\uDFA4 " + (singInputs.length || 1);
+}
+
+async function renderInputPopover() {
+  const pop = $("#input-popover");
+  pop.innerHTML = "";
+  let devs = [];
+  try { devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default"); } catch (_) {}
+  const head = document.createElement("div");
+  head.className = "input-pop-head";
+  head.textContent = devs.length ? "RECORD FROM \u2014 tick more than one for multi-track" 
+    : "No named inputs yet \u2014 record once to grant mic access, then reopen";
+  pop.appendChild(head);
+  const mk = (id, label) => {
+    const row = document.createElement("label");
+    row.className = "input-pop-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = id === "" ? singInputs.length === 0 : singInputs.includes(id);
+    cb.addEventListener("change", () => {
+      if (id === "") singInputs = [];                       // default = alone
+      else {
+        singInputs = cb.checked ? [...singInputs, id] : singInputs.filter((x) => x !== id);
+      }
+      localStorage.setItem("hackbeat_sing_inputs", JSON.stringify(singInputs));
+      renderInputPopover();
+      singInputLabel();
+    });
+    const t = document.createElement("span");
+    t.textContent = label;
+    row.append(cb, t);
+    pop.appendChild(row);
+  };
+  mk("", "System default");
+  devs.forEach((d, i) => mk(d.deviceId, d.label || "Input " + (i + 1)));
+}
+
+$("#btn-inputs").addEventListener("click", async () => {
+  const pop = $("#input-popover");
+  if (!pop.hidden) { pop.hidden = true; return; }
+  await renderInputPopover();
+  pop.hidden = false;
+});
+document.addEventListener("mousedown", (e) => {
+  const pop = $("#input-popover");
+  if (!pop.hidden && !pop.contains(e.target) && e.target !== $("#btn-inputs")) pop.hidden = true;
+});
+singInputLabel();
 
 for (const sel of document.querySelectorAll("select.input-device")) {
   sel.addEventListener("change", (e) => {
@@ -3613,15 +3673,16 @@ function initKeyboard() {
 
 
 /* =====================================================================
-   SING — record yourself over the beat.
+   SING — record yourself over the beat, on one input or several.
 
-   Press it: the mic opens, the pattern starts playing from the top, and
-   everything you sing/say/play is captured. Press it again: playback
-   stops and the take lands as a sample on its own "Voice" track, note
-   at row 0, aligned to where the pattern actually started (the silent
-   gap between mic-start and playback-start is trimmed off the front).
+   Press it: every ticked input (the mic button next door) opens, the
+   pattern starts from the top, and each device records its own take.
+   Press DONE: each take is aligned to where the beat actually started
+   — the mic-open gap is trimmed and each device's reported input
+   latency is compensated — then lands on its own Voice track. The
+   Nudge slider in each channel strip fine-tunes by ear from there.
    ===================================================================== */
-let singRec = null;
+let singSession = null;
 
 async function singStart() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -3629,81 +3690,106 @@ async function singStart() {
     return;
   }
   const btn = $("#btn-sing");
+  const ids = singInputs.length ? singInputs : [""];
+  const takes = [];
   try {
-    const stream = await openAudioInput();
+    for (const id of ids) {
+      const stream = await openAudioInput(id);
+      const track = stream.getAudioTracks()[0];
+      const st = track.getSettings ? track.getSettings() : {};
+      takes.push({
+        stream,
+        label: (track.label || "Voice").split("(")[0].trim().slice(0, 16) || "Voice",
+        latency: typeof st.latency === "number" ? st.latency : 0,
+        chunks: [], rec: null, recStart: 0,
+        done: null, _resolveDone: null,
+      });
+    }
     await AC.resume();
-    const chunks = [];
-    const rec = newRecorder(stream);
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    singRec = { rec, stream, chunks, recStart: 0, playStart: 0 };
-    rec.onstart = () => {
-      singRec.recStart = AC.currentTime;
-      startPlayback(false);                       // beat from the top
-      singRec.playStart = playState ? playState.nextTime : AC.currentTime;
-    };
-    rec.onstop = () => singFinish();
-    rec.start();
+    // arm every recorder and wait until each one has truly started
+    await Promise.all(takes.map((t) => new Promise((started) => {
+      t.rec = newRecorder(t.stream);
+      t.rec.ondataavailable = (e) => { if (e.data.size) t.chunks.push(e.data); };
+      t.done = new Promise((res) => { t._resolveDone = res; });
+      t.rec.onstop = () => t._resolveDone();
+      t.rec.onstart = () => { t.recStart = AC.currentTime; started(); };
+      t.rec.start();
+    })));
+    startPlayback(false);                          // beat from the top, once
+    singSession = { takes, playStart: playState ? playState.nextTime : AC.currentTime };
     btn.classList.add("recording");
     btn.innerHTML = "&#9632; DONE";
-    const got = stream.getAudioTracks()[0].getSettings();
-    toast("Recording " + (got.channelCount || 1) + "ch @ "
+    const got = takes[0].stream.getAudioTracks()[0].getSettings();
+    toast("Recording " + takes.length + " input" + (takes.length > 1 ? "s" : "")
+      + " at " + (got.channelCount || 1) + "ch @ "
       + ((got.sampleRate || AC.sampleRate) / 1000) + "kHz \u2014 sing! Press DONE when finished");
   } catch (err) {
+    for (const t of takes) t.stream.getTracks().forEach((x) => x.stop());
     toast("Mic access denied: " + err.message);
-    singRec = null;
+    singSession = null;
   }
 }
 
 async function singFinish() {
-  const { stream, chunks, recStart, playStart } = singRec;
-  singRec = null;
+  const { takes, playStart } = singSession;
+  singSession = null;
   stopPlayback();
-  stream.getTracks().forEach((t) => t.stop());
+  for (const t of takes) if (t.rec.state !== "inactive") t.rec.stop();
   const btn = $("#btn-sing");
   btn.classList.remove("recording");
   btn.innerHTML = "&#9679; SING";
-  try {
-    const ab = await new Blob(chunks).arrayBuffer();
-    let buf = await AC.decodeAudioData(ab);
-    // trim the head so the take lines up with row 0 of the pattern
-    const skip = Math.max(0, playStart - recStart);
-    const from = Math.min(buf.length - 1, Math.floor(skip * buf.sampleRate));
-    if (from > 0) {
-      const out = AC.createBuffer(buf.numberOfChannels, buf.length - from, buf.sampleRate);
-      for (let c = 0; c < buf.numberOfChannels; c++) {
-        out.copyToChannel(buf.getChannelData(c).subarray(from), c);
+  let kept = 0;
+  for (const t of takes) {
+    try {
+      await t.done;                                // recorder flushed its chunks
+      t.stream.getTracks().forEach((x) => x.stop());
+      const ab = await new Blob(t.chunks).arrayBuffer();
+      let buf = await AC.decodeAudioData(ab);
+      // align to row 0: drop the pre-playback gap, minus what the device
+      // says its input lags (that audio belongs EARLIER on the timeline)
+      const skip = Math.max(0, (playStart - t.recStart) - t.latency);
+      const from = Math.min(buf.length - 1, Math.floor(skip * buf.sampleRate));
+      if (from > 0) {
+        const out = AC.createBuffer(buf.numberOfChannels, buf.length - from, buf.sampleRate);
+        for (let c = 0; c < buf.numberOfChannels; c++) {
+          out.copyToChannel(buf.getChannelData(c).subarray(from), c);
+        }
+        buf = out;
       }
-      buf = out;
+      if (buf.length < buf.sampleRate * 0.2) continue;
+      const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "") + (kept ? "_" + kept : "");
+      const rel = "takes/take_" + stamp + ".wav";
+      const res = await fetch("/api/sample/save?path=" + encodeURIComponent(rel),
+        { method: "POST", body: encodeWav(buf) });
+      if (!res.ok) { toast("Could not save a take"); continue; }
+      buffers.set(rel, buf);
+      await addInstrument(rel, "take_" + stamp);
+      song.channels.push(makeChannel(song.channels.length + 1));
+      song.channels[song.channels.length - 1].name = takes.length > 1 ? t.label : "Voice";
+      for (const pat of song.patterns) for (const row of pat.data) row.push(null);
+      ensureChains();
+      const cell = getOrMakeCell(0, song.channels.length - 1);
+      cell.note = BASE_NOTE;                       // play the take exactly as recorded
+      cell.inst = song.instruments.length;
+      kept++;
+    } catch (err) {
+      t.stream.getTracks().forEach((x) => x.stop());
+      toast("Could not keep a take: " + err.message);
     }
-    if (buf.length < buf.sampleRate * 0.2) { toast("Take too short \u2014 nothing kept"); return; }
-    // save it to the library so it survives reloads and project saves
-    const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "");
-    const rel = "takes/take_" + stamp + ".wav";
-    const res = await fetch("/api/sample/save?path=" + encodeURIComponent(rel),
-      { method: "POST", body: encodeWav(buf) });
-    if (!res.ok) { toast("Could not save the take"); return; }
-    buffers.set(rel, buf);
+  }
+  if (kept) {
     await refreshPalette();
-    await addInstrument(rel, "take_" + stamp);
-    // its own track, so the beat is untouched
-    song.channels.push(makeChannel(song.channels.length + 1));
-    song.channels[song.channels.length - 1].name = "Voice";
-    for (const pat of song.patterns) for (const row of pat.data) row.push(null);
-    ensureChains();
-    const ch = song.channels.length - 1;
-    const cell = getOrMakeCell(0, ch);
-    cell.note = BASE_NOTE;                        // play the take exactly as recorded
-    cell.inst = song.instruments.length;
     renderGrid();
     autosave();
-    toast("Take saved on the Voice track \u2014 press Space to hear it with the beat");
-  } catch (err) {
-    toast("Could not keep the take: " + err.message);
+    toast(kept + " take" + (kept > 1 ? "s" : "") + " on new track" + (kept > 1 ? "s" : "")
+      + " \u2014 press Space to hear it; Nudge in the channel strip fine-tunes timing");
+  } else {
+    toast("Takes too short \u2014 nothing kept");
   }
 }
 
 $("#btn-sing").addEventListener("click", () => {
-  if (singRec) { singRec.rec.stop(); return; }
+  if (singSession) { singFinish(); return; }
   singStart();
 });
 
