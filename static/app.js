@@ -146,6 +146,7 @@ async function getBuffer(path) {
   if (!res.ok) throw new Error("Could not load " + path);
   const buf = await AC.decodeAudioData(await res.arrayBuffer());
   buffers.set(path, buf);
+  scheduleWaveDraw();   // ribbons draw from decoded buffers; repaint now that this one exists
   return buf;
 }
 
@@ -3591,6 +3592,100 @@ function initKeyboard() {
     (window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("simple")));
   if (wantKeys) show(true);
 }
+
+
+/* =====================================================================
+   SING — record yourself over the beat.
+
+   Press it: the mic opens, the pattern starts playing from the top, and
+   everything you sing/say/play is captured. Press it again: playback
+   stops and the take lands as a sample on its own "Voice" track, note
+   at row 0, aligned to where the pattern actually started (the silent
+   gap between mic-start and playback-start is trimmed off the front).
+   ===================================================================== */
+let singRec = null;
+
+async function singStart() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast("Recording needs mic access \u2014 open via http://localhost:8200");
+    return;
+  }
+  const btn = $("#btn-sing");
+  try {
+    const stream = await openAudioInput();
+    await AC.resume();
+    const chunks = [];
+    const rec = new MediaRecorder(stream);
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    singRec = { rec, stream, chunks, recStart: 0, playStart: 0 };
+    rec.onstart = () => {
+      singRec.recStart = AC.currentTime;
+      startPlayback(false);                       // beat from the top
+      singRec.playStart = playState ? playState.nextTime : AC.currentTime;
+    };
+    rec.onstop = () => singFinish();
+    rec.start();
+    btn.classList.add("recording");
+    btn.innerHTML = "&#9632; DONE";
+    toast("Recording \u2014 sing! Press DONE when finished");
+  } catch (err) {
+    toast("Mic access denied: " + err.message);
+    singRec = null;
+  }
+}
+
+async function singFinish() {
+  const { stream, chunks, recStart, playStart } = singRec;
+  singRec = null;
+  stopPlayback();
+  stream.getTracks().forEach((t) => t.stop());
+  const btn = $("#btn-sing");
+  btn.classList.remove("recording");
+  btn.innerHTML = "&#9679; SING";
+  try {
+    const ab = await new Blob(chunks).arrayBuffer();
+    let buf = await AC.decodeAudioData(ab);
+    // trim the head so the take lines up with row 0 of the pattern
+    const skip = Math.max(0, playStart - recStart);
+    const from = Math.min(buf.length - 1, Math.floor(skip * buf.sampleRate));
+    if (from > 0) {
+      const out = AC.createBuffer(buf.numberOfChannels, buf.length - from, buf.sampleRate);
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        out.copyToChannel(buf.getChannelData(c).subarray(from), c);
+      }
+      buf = out;
+    }
+    if (buf.length < buf.sampleRate * 0.2) { toast("Take too short \u2014 nothing kept"); return; }
+    // save it to the library so it survives reloads and project saves
+    const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "");
+    const rel = "takes/take_" + stamp + ".wav";
+    const res = await fetch("/api/sample/save?path=" + encodeURIComponent(rel),
+      { method: "POST", body: encodeWav(buf) });
+    if (!res.ok) { toast("Could not save the take"); return; }
+    buffers.set(rel, buf);
+    await refreshPalette();
+    await addInstrument(rel, "take_" + stamp);
+    // its own track, so the beat is untouched
+    song.channels.push(makeChannel(song.channels.length + 1));
+    song.channels[song.channels.length - 1].name = "Voice";
+    for (const pat of song.patterns) for (const row of pat.data) row.push(null);
+    ensureChains();
+    const ch = song.channels.length - 1;
+    const cell = getOrMakeCell(0, ch);
+    cell.note = BASE_NOTE;                        // play the take exactly as recorded
+    cell.inst = song.instruments.length;
+    renderGrid();
+    autosave();
+    toast("Take saved on the Voice track \u2014 press Space to hear it with the beat");
+  } catch (err) {
+    toast("Could not keep the take: " + err.message);
+  }
+}
+
+$("#btn-sing").addEventListener("click", () => {
+  if (singRec) { singRec.rec.stop(); return; }
+  singStart();
+});
 
 initKeyboard();
 
