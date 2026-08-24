@@ -569,6 +569,7 @@ function renderGrid() {
     });
     const fxb = document.createElement("button");
     fxb.textContent = "STRIP";
+    fxb.classList.add("strip-btn");
     fxb.title = "Channel Strip & FX";
     fxb.classList.toggle("fx-open", ui.fxChannel === i);
     fxb.addEventListener("click", () => setFxChannel(i));
@@ -2083,7 +2084,16 @@ async function refreshPalette() {
       });
       item.append(label, editB, prev, delB);
       item.addEventListener("dblclick", () => openEditor(s.path, s.name));
-      item.addEventListener("click", () => addInstrument(s.path, s.name));
+      item.addEventListener("click", async () => {
+        addInstrument(s.path, s.name);
+        // hear it the moment you click it — no hunting for the tiny play button
+        try {
+          await AC.resume();
+          const buf = await getBuffer(s.path);
+          const src = AC.createBufferSource();
+          src.buffer = buf; src.connect(master); src.start();
+        } catch (_) {}
+      });
       list.appendChild(item);
     }
   }
@@ -3364,6 +3374,7 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
       renderGrid();
     }
   } else {
+    loadDemoBeat();   // first time ever: something to hear before learning anything
     refreshPatternSelect();
     renderOrderChips(null);
     renderInstruments();
@@ -3377,6 +3388,60 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
   showTourIfNew();   // first-run "how to play" card, after everything is on screen
 })();
 
+
+/* =====================================================================
+   Demo beat — four bars of kick / snare / hats / bass from the starter
+   samples, so the very first Space press makes music. Only used when
+   there is no autosave, i.e. the first open ever (or after "New").
+   ===================================================================== */
+function loadDemoBeat() {
+  const inst = [
+    { path: "starter/kick.wav",       name: "kick" },
+    { path: "starter/snare.wav",      name: "snare" },
+    { path: "starter/hat_closed.wav", name: "hat_closed" },
+    { path: "starter/bass_C1.wav",    name: "bass_C1" },
+  ];
+  song.instruments = inst;
+  ["Kick", "Snare", "Hats", "Bass"].forEach((n, i) => { song.channels[i].name = n; });
+  const pat = song.patterns[0];
+  const put = (row, ch, note) => {
+    const c = getOrMakeCell(row, ch, 0);
+    c.note = note; c.inst = ch + 1; c.vol = null;
+  };
+  // one bar = 16 rows (4 beats x 4 rows). Repeat it four times.
+  const bassBar = { 0: 60, 3: 60, 6: 67, 8: 60, 11: 60, 14: 65 };
+  for (let bar = 0; bar < 4; bar++) {
+    const b = bar * 16;
+    for (let r = 0; r < 16; r++) {
+      if (r % 4 === 0) put(b + r, 0, 60);              // kick on every beat
+      if (r === 4 || r === 12) put(b + r, 1, 60);      // snare on 2 and 4
+      if (r % 2 === 1) put(b + r, 2, 60);              // hats in between
+      if (bassBar[r] != null) put(b + r, 3, bassBar[r]);
+    }
+  }
+  ui.curInstrument = 0;
+  inst.forEach((i) => getBuffer(i.path).catch(() => {}));   // warm the cache
+}
+
+/* =====================================================================
+   SIMPLE / PRO. Simple hides the studio gear (CSS does the hiding, see
+   body.simple in style.css). New users start simple; the choice sticks.
+   ===================================================================== */
+const SIMPLE_KEY = "hackbeat_simple";
+function setSimple(on) {
+  document.body.classList.toggle("simple", on);
+  const b = $("#btn-simple");
+  b.classList.toggle("toggled", on);
+  b.textContent = on ? "SIMPLE" : "PRO";
+  localStorage.setItem(SIMPLE_KEY, on ? "1" : "0");
+}
+setSimple(localStorage.getItem(SIMPLE_KEY) !== "0");
+$("#btn-simple").addEventListener("click", () => {
+  const on = !document.body.classList.contains("simple");
+  setSimple(on);
+  toast(on ? "Simple mode — just the grid, the keys and the sounds"
+           : "Pro mode — mixer, effects, patterns, AI and song order are back");
+});
 
 /* =====================================================================
    First-run tutorial. Short on purpose — the full manual is F1.
@@ -3464,7 +3529,8 @@ function initKeyboard() {
     });
   };
   $("#btn-keys").addEventListener("click", () => show(dock.classList.contains("hidden")));
-  $("#kb-close").addEventListener("click", () => show(false));
+  $("#kb-close").addEventListener("click", () => { show(false); localStorage.setItem("hackbeat_keys", "0"); });
+  $("#btn-keys").addEventListener("click", () => localStorage.setItem("hackbeat_keys", dock.classList.contains("hidden") ? "0" : "1"));
 
   const setOct = (d) => {
     ui.octave = Math.max(1, Math.min(8, ui.octave + d));
@@ -3499,7 +3565,12 @@ function initKeyboard() {
 
   // A phone has no computer keyboard, so the on-screen one IS the
   // instrument there — open it without being asked.
-  if (window.matchMedia("(pointer: coarse)").matches) show(true);
+  // ...and in simple mode on a PC too, so there's always a piano on screen.
+  // Closing it with the X is remembered, so it stays away if you want it away.
+  const kbPref = localStorage.getItem("hackbeat_keys");
+  const wantKeys = kbPref === "1" || (kbPref !== "0" &&
+    (window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("simple")));
+  if (wantKeys) show(true);
 }
 
 initKeyboard();

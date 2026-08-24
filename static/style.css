@@ -741,9 +741,6 @@ input[type="range"] {
      measured and set by initKeyboard rather than guessed here -- the bar
      above the keys wraps to two lines on a narrow phone, and a hardcoded
      figure leaves the bottom rows hidden underneath. */
-  body:has(#keyboard-dock:not(.hidden)) #workspace {
-    padding-bottom: var(--kb-height, 178px);
-  }
 
   .piano { height: 152px; }
   .pk { font-size: 11px; }
@@ -819,3 +816,28 @@ input[type="range"] {
 }
 .tour-check { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .tour-btns { display: flex; gap: 8px; }
+
+
+/* ---------- SIMPLE mode: hide the studio, keep the toy ----------
+   Everything below is a "pro" control. Nothing is removed, it's just
+   out of sight until the SIMPLE button is switched off. */
+body.simple #btn-play-song-top,
+body.simple #btn-play-song,
+body.simple #topbar .ctl:has(#rpb),
+body.simple #topbar .ctl:has(#octave),
+body.simple #topbar .ctl:has(#btn-wave),
+body.simple #topbar .ctl:has(#zoom-in),
+body.simple #topbar .ctl:has(#pattern-select),
+body.simple #topbar .ctl:has(#btn-add-channel),
+body.simple #topbar .ctl:has(#btn-rm-channel),
+body.simple #order-bar,
+body.simple #gen-panel,
+body.simple #fx-panel,
+body.simple #btn-refresh,
+body.simple #btn-rec,
+body.simple .strip-btn { display: none !important; }
+
+/* the grid keeps scrolling above the docked keyboard, on any screen size */
+body:has(#keyboard-dock:not(.hidden)) #workspace {
+  padding-bottom: var(--kb-height, 178px);
+}
