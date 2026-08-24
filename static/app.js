@@ -1285,7 +1285,7 @@ function rafHighlight() {
   rafId = requestAnimationFrame(rafHighlight);
 }
 
-async function startPlayback(songMode) {
+async function startPlayback(songMode, startAt) {
   stopPlayback();
   await AC.resume();
   ensureChains();
@@ -1301,7 +1301,7 @@ async function startPlayback(songMode) {
     orderPos: songMode ? 0 : null,
     patIdx: songMode ? seq[0] : ui.curPattern,
     row: 0,
-    nextTime: AC.currentTime + 0.08,
+    nextTime: startAt || (AC.currentTime + 0.08),
     queue: [],
     timer: setInterval(schedulerTick, 25),
   };
@@ -3682,6 +3682,55 @@ function initKeyboard() {
    latency is compensated — then lands on its own Voice track. The
    Nudge slider in each channel strip fine-tunes by ear from there.
    ===================================================================== */
+/* ---- count-in click + self-calibrating sync --------------------------
+   SING plays four ticks before the beat. Each recording is then searched
+   for those ticks: where they actually landed in the audio, versus where
+   the clock says they were played, IS the device's true total latency —
+   measured fresh on every take, on whatever hardware this runs on. */
+let clickBuf = null;
+function getClickBuf() {
+  if (clickBuf) return clickBuf;
+  const sr = AC.sampleRate, n = Math.floor(sr * 0.03);
+  clickBuf = AC.createBuffer(1, n, sr);
+  const d = clickBuf.getChannelData(0);
+  for (let i = 0; i < n; i++) {
+    d[i] = Math.sin(2 * Math.PI * 2093 * i / sr) * Math.exp(-i / (sr * 0.006)) * 0.6;
+  }
+  return clickBuf;
+}
+function playClick(t) {
+  const src = AC.createBufferSource();
+  src.buffer = getClickBuf();
+  src.connect(master);
+  src.start(t);
+}
+/* Where does the first 2093Hz tick sit in this recording? Goertzel energy
+   over short hops; the first big spike above the noise floor is the tick.
+   Returns seconds into the recording, or null if nothing convincing. */
+function findClickOnset(data, sr, searchEndSec) {
+  const hop = 128, win = 512;
+  const end = Math.min(data.length, Math.floor(searchEndSec * sr));
+  const coeff = 2 * Math.cos(2 * Math.PI * 2093 / sr);
+  const powers = [];
+  for (let start = 0; start + win <= end; start += hop) {
+    let s1 = 0, s2 = 0;
+    for (let i = 0; i < win; i++) {
+      const s0 = data[start + i] + coeff * s1 - s2;
+      s2 = s1; s1 = s0;
+    }
+    powers.push(s1 * s1 + s2 * s2 - coeff * s1 * s2);
+  }
+  if (powers.length < 20) return null;
+  const sorted = [...powers].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const floor = Math.max(median * 12, 1e-4);
+  for (let i = 0; i < powers.length; i++) {
+    // the spike window straddles the click's true start — report its middle
+    if (powers[i] > floor) return (i * hop + win / 2) / sr;
+  }
+  return null;
+}
+
 let singSession = null;
 
 async function singStart() {
@@ -3715,8 +3764,16 @@ async function singStart() {
       t.rec.onstart = () => { t.recStart = AC.currentTime; started(); };
       t.rec.start();
     })));
-    startPlayback(false);                          // beat from the top, once
-    singSession = { takes, playStart: playState ? playState.nextTime : AC.currentTime };
+    // four audible count-in ticks, then the beat — the singer gets a
+    // ready-set-go AND every recording gets a sync mark it can be
+    // measured against, whatever device it came in on
+    const beat = secPerRow() * song.rowsPerBeat;
+    const t0 = AC.currentTime + 0.2;
+    const clickTimes = [0, 1, 2, 3].map((k) => t0 + k * beat);
+    clickTimes.forEach(playClick);
+    startPlayback(false, t0 + 4 * beat);           // beat from the top, once
+    singSession = { takes, clickTimes, beat,
+                    playStart: playState ? playState.nextTime : AC.currentTime };
     btn.classList.add("recording");
     btn.innerHTML = "&#9632; DONE";
     const got = takes[0].stream.getAudioTracks()[0].getSettings();
@@ -3731,7 +3788,7 @@ async function singStart() {
 }
 
 async function singFinish() {
-  const { takes, playStart } = singSession;
+  const { takes, playStart, clickTimes, beat } = singSession;
   singSession = null;
   stopPlayback();
   for (const t of takes) if (t.rec.state !== "inactive") t.rec.stop();
@@ -3745,9 +3802,24 @@ async function singFinish() {
       t.stream.getTracks().forEach((x) => x.stop());
       const ab = await new Blob(t.chunks).arrayBuffer();
       let buf = await AC.decodeAudioData(ab);
-      // align to row 0: drop the pre-playback gap, minus what the device
-      // says its input lags (that audio belongs EARLIER on the timeline)
-      const skip = Math.max(0, (playStart - t.recStart) - t.latency);
+      // align to row 0. Preferred: find the count-in ticks in the audio
+      // itself — that measures the real, whole-chain latency of THIS
+      // device on THIS machine. Fallback (headphones, quiet mic): the
+      // clock gap minus whatever latency the device admits to.
+      let delta = -t.latency;
+      t.synced = "clock";
+      const searchEnd = (playStart - t.recStart) + beat;   // ticks must be in here
+      const onset = findClickOnset(buf.getChannelData(0), buf.sampleRate, searchEnd);
+      if (onset != null) {
+        const expected = clickTimes.map((ct) => ct - t.recStart);
+        const nearest = expected.reduce((a, b) => Math.abs(onset - b) < Math.abs(onset - a) ? b : a);
+        const measured = onset - nearest;
+        if (Math.abs(measured) < 0.35 * beat) {            // sane = trust it
+          delta = measured;
+          t.synced = "ticks (" + Math.round(measured * 1000) + "ms)";
+        }
+      }
+      const skip = Math.max(0, (playStart - t.recStart) + delta);
       const from = Math.min(buf.length - 1, Math.floor(skip * buf.sampleRate));
       if (from > 0) {
         const out = AC.createBuffer(buf.numberOfChannels, buf.length - from, buf.sampleRate);
@@ -3781,8 +3853,9 @@ async function singFinish() {
     await refreshPalette();
     renderGrid();
     autosave();
+    const how = takes.filter((t) => t.synced).map((t) => t.synced).join(", ");
     toast(kept + " take" + (kept > 1 ? "s" : "") + " on new track" + (kept > 1 ? "s" : "")
-      + " \u2014 press Space to hear it; Nudge in the channel strip fine-tunes timing");
+      + " \u2014 synced by " + how + ". Space to hear it; Nudge fine-tunes");
   } else {
     toast("Takes too short \u2014 nothing kept");
   }
