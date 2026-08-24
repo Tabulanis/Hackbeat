@@ -835,3 +835,6 @@ body.simple #order-bar { display: none !important; }
 body:has(#keyboard-dock:not(.hidden)) #workspace {
   padding-bottom: var(--kb-height, 178px);
 }
+
+/* topbar input picker stays small so the transport doesn't crowd */
+#input-device-top { max-width: 140px; }

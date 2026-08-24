@@ -2242,7 +2242,7 @@ $("#gen-hum").addEventListener("click", async () => {
   try {
     const stream = await openAudioInput();
     const chunks = [];
-    const rec = new MediaRecorder(stream);
+    const rec = newRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     rec.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
@@ -3091,11 +3091,26 @@ function emStop() {
    the picker; the choice is remembered and shared by every recorder. */
 let inputDeviceId = localStorage.getItem("hackbeat_input_device") || "";
 
+/* Best capture the browser offers: uncompressed PCM if supported,
+   otherwise opus at double the default bitrate. Every recorder in the
+   app comes through here so none quietly records worse than the rest. */
+function newRecorder(stream) {
+  if (window.MediaRecorder && MediaRecorder.isTypeSupported
+      && MediaRecorder.isTypeSupported("audio/webm;codecs=pcm")) {
+    return new MediaRecorder(stream, { mimeType: "audio/webm;codecs=pcm" });
+  }
+  return new MediaRecorder(stream, { audioBitsPerSecond: 256000 });
+}
+
 async function openAudioInput() {
   const audio = {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
+    // ask for the moon; the browser clamps to the device's real maximum,
+    // so a stereo interface records stereo and a 96k interface records 96k
+    channelCount: { ideal: 32 },
+    sampleRate: { ideal: 192000 },
   };
   // "ideal", not "exact": if the chosen device got unplugged, fall back
   // to the default input instead of refusing to record at all
@@ -3106,35 +3121,38 @@ async function openAudioInput() {
 }
 
 async function refreshInputPicker() {
-  const sel = $("#input-device");
-  if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  const sels = document.querySelectorAll("select.input-device");
+  if (!sels.length || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
   let devs = [];
   try { devs = await navigator.mediaDevices.enumerateDevices(); } catch (_) { return; }
-  sel.innerHTML = "";
-  const def = document.createElement("option");
-  def.value = "";
-  def.textContent = "Default input";
-  sel.appendChild(def);
-  for (const d of devs) {
-    if (d.kind !== "audioinput" || !d.deviceId || d.deviceId === "default") continue;
-    const o = document.createElement("option");
-    o.value = d.deviceId;
-    o.textContent = d.label || "Input " + sel.options.length;
-    sel.appendChild(o);
+  for (const sel of sels) {
+    sel.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Default input";
+    sel.appendChild(def);
+    for (const d of devs) {
+      if (d.kind !== "audioinput" || !d.deviceId || d.deviceId === "default") continue;
+      const o = document.createElement("option");
+      o.value = d.deviceId;
+      o.textContent = d.label || "Input " + sel.options.length;
+      sel.appendChild(o);
+    }
+    sel.value = [...sel.options].some((o) => o.value === inputDeviceId) ? inputDeviceId : "";
   }
-  sel.value = [...sel.options].some((o) => o.value === inputDeviceId) ? inputDeviceId : "";
 }
 
-if ($("#input-device")) {
-  $("#input-device").addEventListener("change", (e) => {
+for (const sel of document.querySelectorAll("select.input-device")) {
+  sel.addEventListener("change", (e) => {
     inputDeviceId = e.target.value;
     localStorage.setItem("hackbeat_input_device", inputDeviceId);
+    refreshInputPicker();   // keep every copy of the picker showing the same choice
   });
-  refreshInputPicker();
-  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
-    // plugging in a mic mid-session should show up without a reload
-    navigator.mediaDevices.addEventListener("devicechange", refreshInputPicker);
-  }
+}
+refreshInputPicker();
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  // plugging in a mic mid-session should show up without a reload
+  navigator.mediaDevices.addEventListener("devicechange", refreshInputPicker);
 }
 
 /* mic recording */
@@ -3148,7 +3166,7 @@ async function emToggleRecord() {
   try {
     const stream = await openAudioInput();
     const chunks = [];
-    const rec = new MediaRecorder(stream);
+    const rec = newRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     rec.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
@@ -3615,7 +3633,7 @@ async function singStart() {
     const stream = await openAudioInput();
     await AC.resume();
     const chunks = [];
-    const rec = new MediaRecorder(stream);
+    const rec = newRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     singRec = { rec, stream, chunks, recStart: 0, playStart: 0 };
     rec.onstart = () => {
@@ -3627,7 +3645,9 @@ async function singStart() {
     rec.start();
     btn.classList.add("recording");
     btn.innerHTML = "&#9632; DONE";
-    toast("Recording \u2014 sing! Press DONE when finished");
+    const got = stream.getAudioTracks()[0].getSettings();
+    toast("Recording " + (got.channelCount || 1) + "ch @ "
+      + ((got.sampleRate || AC.sampleRate) / 1000) + "kHz \u2014 sing! Press DONE when finished");
   } catch (err) {
     toast("Mic access denied: " + err.message);
     singRec = null;
