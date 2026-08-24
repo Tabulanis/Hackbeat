@@ -3374,7 +3374,46 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
   await refreshPalette();
   await refreshProjectList();
   grid.focus();
+  showTourIfNew();   // first-run "how to play" card, after everything is on screen
 })();
+
+
+/* =====================================================================
+   First-run tutorial. Short on purpose — the full manual is F1.
+   Stays until the user ticks "don't show again"; closing without the
+   tick just hides it for this visit.
+   ===================================================================== */
+const TOUR_KEY = "hackbeat_tour_dismissed";
+
+function showTourIfNew() {
+  if (localStorage.getItem(TOUR_KEY) === "1") return;
+  $("#tour-overlay").hidden = false;
+  $("#tour-ok").focus();   // keeps note keys out of the grid while the card is up
+}
+
+function closeTour() {
+  if ($("#tour-dont-show").checked) localStorage.setItem(TOUR_KEY, "1");
+  $("#tour-overlay").hidden = true;
+  grid.focus();
+}
+
+$("#tour-ok").addEventListener("click", closeTour);
+$("#tour-close").addEventListener("click", closeTour);
+$("#tour-more").addEventListener("click", () => {
+  closeTour();
+  $("#help-overlay").hidden = false;
+});
+$("#tour-overlay").addEventListener("mousedown", (e) => {
+  if (e.target === $("#tour-overlay")) closeTour();
+});
+// While the card is showing, no keystroke should reach the tracker —
+// otherwise a curious "Z" would silently write a note behind the card.
+window.addEventListener("keydown", (e) => {
+  if ($("#tour-overlay").hidden) return;
+  if (e.key === "Escape" || e.key === "Enter") closeTour();
+  e.stopImmediatePropagation();
+  e.preventDefault();
+}, true);
 
 
 /* =====================================================================

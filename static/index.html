@@ -255,6 +255,49 @@
   </div>
 </div>
 
+<!-- first-run tutorial: shows until "don't show again" is ticked -->
+<div id="tour-overlay" hidden>
+  <div id="tour-box">
+    <div class="help-head">
+      <span>HOW TO PLAY</span>
+      <button id="tour-close" class="mini-btn" title="Close">&#10005;</button>
+    </div>
+    <div class="tour-body">
+      <p class="tour-lead">Time runs <strong>left to right</strong>. Each lane is one instrument.
+      Put notes in the boxes, press play.</p>
+
+      <ol class="tour-steps">
+        <li><strong>Pick a sound</strong> &mdash; click one in the <strong>LIBRARY</strong> list (bottom-left).</li>
+        <li><strong>Click a box</strong> in the grid.</li>
+        <li><strong>Play a note</strong> &mdash; your computer keyboard is a piano:</li>
+      </ol>
+
+      <div class="tour-keys">
+        <div class="tour-row"><span class="tour-row-label">high</span>
+          <kbd>Q</kbd><kbd class="k-black">2</kbd><kbd>W</kbd><kbd class="k-black">3</kbd><kbd>E</kbd><kbd>R</kbd><kbd class="k-black">5</kbd><kbd>T</kbd><kbd class="k-black">6</kbd><kbd>Y</kbd><kbd class="k-black">7</kbd><kbd>U</kbd><kbd>I</kbd>
+        </div>
+        <div class="tour-row"><span class="tour-row-label">low</span>
+          <kbd>Z</kbd><kbd class="k-black">S</kbd><kbd>X</kbd><kbd class="k-black">D</kbd><kbd>C</kbd><kbd>V</kbd><kbd class="k-black">G</kbd><kbd>B</kbd><kbd class="k-black">H</kbd><kbd>N</kbd><kbd class="k-black">J</kbd><kbd>M</kbd>
+        </div>
+        <div class="tour-keys-note"><kbd>Z</kbd> is C, <kbd>S</kbd> is C#, <kbd>X</kbd> is D&hellip; dark keys are the sharps. The top row is the same thing one octave higher. No typing keyboard? Hit <strong>&#9835; KEYS</strong> in the toolbar for an on-screen piano.</div>
+      </div>
+
+      <ol class="tour-steps" start="4">
+        <li><strong>Press <kbd>Space</kbd></strong> to play / stop. That&rsquo;s it &mdash; you&rsquo;re making music.</li>
+      </ol>
+
+      <p class="tour-fine">Notes only get written while <strong>REC</strong> (in the toolbar) is lit. Turn it off to just noodle. Press <kbd>F1</kbd> any time for the full manual.</p>
+    </div>
+    <div class="tour-foot">
+      <label class="tour-check"><input type="checkbox" id="tour-dont-show"> Don&rsquo;t show this again</label>
+      <div class="tour-btns">
+        <button id="tour-more">Full help</button>
+        <button id="tour-ok" class="accent">Got it, let me play</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="help-overlay" hidden>
   <div id="help-box">
     <div class="help-head">
