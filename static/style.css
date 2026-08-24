@@ -531,7 +531,7 @@ input[type="range"] {
 .em-sep { width: 1px; height: 18px; background: var(--line); }
 #em-p1, #em-p2 { width: 110px; accent-color: var(--amber); padding: 0; }
 #em-name { flex: 1; min-width: 120px; }
-#em-record.recording, #gen-hum.recording { background: #6b2f2f; border-color: #d05050; color: #ffd6d6; }
+#em-record.recording, #gen-hum.recording, #btn-sing.recording { background: #6b2f2f; border-color: #d05050; color: #ffd6d6; }
 
 
 /* ---------- generate panel inside the sample editor ---------- */
