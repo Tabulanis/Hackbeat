@@ -3439,8 +3439,8 @@ setSimple(localStorage.getItem(SIMPLE_KEY) !== "0");
 $("#btn-simple").addEventListener("click", () => {
   const on = !document.body.classList.contains("simple");
   setSimple(on);
-  toast(on ? "Simple mode — just the grid, the keys and the sounds"
-           : "Pro mode — mixer, effects, patterns, AI and song order are back");
+  toast(on ? "Simple mode — song order, patterns and view tweaks tucked away"
+           : "Pro mode — patterns, song order and all the knobs are back");
 });
 
 /* =====================================================================
