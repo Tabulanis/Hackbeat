@@ -2689,27 +2689,30 @@ $("#project-name").addEventListener("change", autosave);
 
 /* ================= export WAV ================= */
 function encodeWav(rendered) {
+  /* 32-bit float WAV (format 3) — a bit-exact dump of the engine's own
+     numbers. Nothing is rounded to 16-bit on the way to disk, and peaks
+     over 0dB survive for mixing instead of being clipped off. Every DAW
+     and modern player reads it; decodeAudioData round-trips it exactly. */
   const numCh = rendered.numberOfChannels;
   const len = rendered.length;
   const rate = rendered.sampleRate;
-  const blockAlign = numCh * 2;
+  const blockAlign = numCh * 4;
   const dataSize = len * blockAlign;
   const buf = new ArrayBuffer(44 + dataSize);
   const v = new DataView(buf);
   const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
   ws(0, "RIFF"); v.setUint32(4, 36 + dataSize, true); ws(8, "WAVE");
-  ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 3, true);   // 3 = IEEE float
   v.setUint16(22, numCh, true); v.setUint32(24, rate, true);
   v.setUint32(28, rate * blockAlign, true); v.setUint16(32, blockAlign, true);
-  v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, dataSize, true);
+  v.setUint16(34, 32, true); ws(36, "data"); v.setUint32(40, dataSize, true);
   const chans = [];
   for (let c = 0; c < numCh; c++) chans.push(rendered.getChannelData(c));
   let off = 44;
   for (let i = 0; i < len; i++) {
     for (let c = 0; c < numCh; c++) {
-      const s = Math.max(-1, Math.min(1, chans[c][i]));
-      v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-      off += 2;
+      v.setFloat32(off, chans[c][i], true);
+      off += 4;
     }
   }
   return new Blob([buf], { type: "audio/wav" });
