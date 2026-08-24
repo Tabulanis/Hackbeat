@@ -125,7 +125,7 @@ async def stretch_sample(request: Request, rate: float = 1.0, semitones: float =
         if semitones != 0.0:
             y = librosa.effects.pitch_shift(y, sr=sr, n_steps=semitones)
         out_buf = io.BytesIO()
-        sf.write(out_buf, y.T, sr, format="WAV", subtype="PCM_16")
+        sf.write(out_buf, y.T, sr, format="WAV", subtype="FLOAT")
         return Response(content=out_buf.getvalue(), media_type="audio/wav")
     except HTTPException:
         raise
