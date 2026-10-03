@@ -3360,12 +3360,7 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
       renderGrid();
     }
   } else {
-    loadDemoBeat();   // first time ever: something to hear before learning anything
-    refreshPatternSelect();
-    renderOrderChips(null);
-    renderInstruments();
-    renderFxPanel();
-    renderGrid();
+    await loadDemoSong();   // first time ever: something to hear before learning anything
   }
   
   await refreshPalette();
@@ -3376,37 +3371,20 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
 
 
 /* =====================================================================
-   Demo beat — four bars of kick / snare / hats / bass from the starter
-   samples, so the very first Space press makes music. Only used when
-   there is no autosave, i.e. the first open ever (or after "New").
+   The demo song ("Dope", the owner's, 2026-10-02) — so the very first
+   Space press makes music. Only used when there is no autosave, i.e. the
+   first open ever. Its sounds ship in samples/demo/; it opens under its own
+   name (dope-demo) so edits save to a project of the user's own.
    ===================================================================== */
-function loadDemoBeat() {
-  const inst = [
-    { path: "starter/kick.wav",       name: "kick" },
-    { path: "starter/snare.wav",      name: "snare" },
-    { path: "starter/hat_closed.wav", name: "hat_closed" },
-    { path: "starter/bass_C1.wav",    name: "bass_C1" },
-  ];
-  song.instruments = inst;
-  ["Kick", "Snare", "Hats", "Bass"].forEach((n, i) => { song.channels[i].name = n; });
-  const pat = song.patterns[0];
-  const put = (row, ch, note) => {
-    const c = getOrMakeCell(row, ch, 0);
-    c.note = note; c.inst = ch + 1; c.vol = null;
-  };
-  // one bar = 16 rows (4 beats x 4 rows). Repeat it four times.
-  const bassBar = { 0: 60, 3: 60, 6: 67, 8: 60, 11: 60, 14: 65 };
-  for (let bar = 0; bar < 4; bar++) {
-    const b = bar * 16;
-    for (let r = 0; r < 16; r++) {
-      if (r % 4 === 0) put(b + r, 0, 60);              // kick on every beat
-      if (r === 4 || r === 12) put(b + r, 1, 60);      // snare on 2 and 4
-      if (r % 2 === 1) put(b + r, 2, 60);              // hats in between
-      if (bassBar[r] != null) put(b + r, 3, bassBar[r]);
-    }
+async function loadDemoSong() {
+  try {
+    const res = await fetch("demo/dope.json");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    applyProjectData(await res.json(), "dope-demo");
+  } catch (err) {
+    console.warn("Demo song didn't load, starting blank", err);
+    applyProjectData(newSongData(), "untitled");
   }
-  ui.curInstrument = 0;
-  inst.forEach((i) => getBuffer(i.path).catch(() => {}));   // warm the cache
 }
 
 /* =====================================================================
