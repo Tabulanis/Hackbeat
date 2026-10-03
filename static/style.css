@@ -851,3 +851,6 @@ body:has(#keyboard-dock:not(.hidden)) #workspace {
 }
 .input-pop-head { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--dim); margin-bottom: 6px; }
 .input-pop-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 0; cursor: pointer; color: var(--ink); }
+
+/* autosave-to-file indicator */
+.save-state { font-size: 11px; color: #8b92a0; margin-left: 6px; min-width: 70px; display: inline-block; }

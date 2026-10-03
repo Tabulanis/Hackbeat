@@ -146,12 +146,67 @@ def load_project(name: str):
     return JSONResponse(json.loads(p.read_text()))
 
 
+BACKUPS = PROJECTS / ".backups"
+KEEP_BACKUPS = 4
+
+
+def _backup_path(name: str, n: int) -> Path:
+    return BACKUPS / f"{name}.{n}.json"
+
+
+def _rotate_backups(name: str, current: Path) -> None:
+    """Keep the last KEEP_BACKUPS versions: .1 = newest. The file about to be
+    overwritten becomes .1; the oldest falls off the end."""
+    if not current.is_file():
+        return
+    BACKUPS.mkdir(exist_ok=True)
+    oldest = _backup_path(name, KEEP_BACKUPS)
+    if oldest.exists():
+        oldest.unlink()
+    for n in range(KEEP_BACKUPS - 1, 0, -1):
+        src = _backup_path(name, n)
+        if src.exists():
+            src.rename(_backup_path(name, n + 1))
+    _backup_path(name, 1).write_bytes(current.read_bytes())
+
+
 @app.post("/api/projects/{name}")
-async def save_project(name: str, request: Request):
+async def save_project(name: str, request: Request, autosave: int = 0):
     data = await request.json()
     name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip() or "untitled"
-    (PROJECTS / (name + ".json")).write_text(json.dumps(data, indent=2))
+    path = PROJECTS / (name + ".json")
+    # an autosave sends the song without its embedded samples (too heavy to
+    # repeat on every edit): keep the ones already in the file
+    if autosave and "sampleData" not in data and path.is_file():
+        try:
+            old = json.loads(path.read_text())
+            if "sampleData" in old:
+                data["sampleData"] = old["sampleData"]
+        except (OSError, ValueError):
+            pass
+    _rotate_backups(name, path)
+    path.write_text(json.dumps(data, indent=2))
     return {"ok": True, "name": name}
+
+
+@app.get("/api/projects/{name}/backups")
+def list_backups(name: str):
+    out = []
+    for n in range(1, KEEP_BACKUPS + 1):
+        p = safe_child(BACKUPS, f"{name}.{n}.json") if BACKUPS.exists() else None
+        if p and p.is_file():
+            out.append({"n": n, "saved": p.stat().st_mtime})
+    return {"backups": out}
+
+
+@app.get("/api/projects/{name}/backups/{n}")
+def load_backup(name: str, n: int):
+    if not 1 <= n <= KEEP_BACKUPS:
+        raise HTTPException(status_code=404, detail="No such backup")
+    p = safe_child(BACKUPS, f"{name}.{n}.json")
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="No such backup")
+    return JSONResponse(json.loads(p.read_text()))
 
 
 # ---------------------------------------------------------------- AI generation

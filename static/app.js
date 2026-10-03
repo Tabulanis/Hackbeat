@@ -10,6 +10,10 @@ const $ = (s) => document.querySelector(s);
 const NOTE_OFF = -1;
 const NOTE_NAMES = ["C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"];
 const BASE_NOTE = 60; // C-5
+/* An instrument's own pitch shift, in semitones: Pitch (whole semitones,
+   speeds the sample up / slows it down) + Tune (cents, for a sample that's
+   a bit out of key). Every place a sample is played adds this. */
+const instShift = (inst) => (inst && ((inst.transpose || 0) + (inst.tune || 0) / 100)) || 0;
 const KEYMAP = {
   z: 0, s: 1, x: 2, d: 3, c: 4, v: 5, g: 6, b: 7, h: 8, n: 9, j: 10, m: 11,
   q: 12, "2": 13, w: 14, "3": 15, e: 16, r: 17, "5": 18, t: 19, "6": 20,
@@ -107,6 +111,40 @@ function autosave() {
   } catch (e) {
     console.warn("Autosave failed", e);
   }
+  scheduleFileSave();
+}
+
+/* AUTOSAVE TO THE FILE: about a second after the last edit, the project is
+   written to its file (the server keeps the previous 4 versions as backups —
+   the Backups menu restores them). Loading a project doesn't trigger it:
+   loadProject/saveProject clear `dirty` right after their own autosave(). */
+let fileSaveTimer = 0;
+function scheduleFileSave() {
+  clearTimeout(fileSaveTimer);
+  fileSaveTimer = setTimeout(fileSaveNow, 1000);
+}
+async function fileSaveNow() {
+  if (!dirty) return;
+  const name = $("#project-name").value.trim() || "untitled";
+  setSaveState("saving…");
+  try {
+    const res = await fetch("/api/projects/" + encodeURIComponent(name) + "?autosave=1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(serialize()),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    dirty = false;
+    setSaveState("saved ✓");
+  } catch (err) {
+    setSaveState("NOT saved — " + err.message, true);
+  }
+}
+function setSaveState(text, bad) {
+  const el = document.getElementById("save-state");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = bad ? "#ff7a6a" : "";
 }
 window.addEventListener("pagehide", autosave);
 window.addEventListener("visibilitychange", () => {
@@ -482,7 +520,7 @@ function drawWaveOverlay() {
 
       /* cut where the audio engine cuts: the next event on this channel */
       const cutPos = k + 1 < evts.length ? evts[k + 1].pos : pat.rows;
-      const rate = Math.pow(2, (ev.note - BASE_NOTE) / 12);
+      const rate = Math.pow(2, (ev.note + instShift(inst) - BASE_NOTE) / 12);
       const durRows = Math.min(buf.duration / rate / spr, cutPos - ev.pos);
       const pixels = Math.max(1, Math.floor(durRows * cellW));
       const data = buf.getChannelData(0);
@@ -1096,7 +1134,7 @@ function keyjazz(midi, chIdx, velocity) {
   if (settings.glide > 0.001) {
     for (const [k, v] of pool.held) {
       if (v.channel === chIdx && !v.released) {
-        v.glideTo(midi, BASE_NOTE, settings.glide);
+        v.glideTo(midi, BASE_NOTE - instShift(inst), settings.glide);
         pool.held.delete(k);
         pool.held.set(HB_VOICES.VoicePool.key(chIdx, midi), v);
         return v;
@@ -1105,7 +1143,7 @@ function keyjazz(midi, chIdx, velocity) {
   }
 
   return pool.noteOn({
-    buffer: buf, midi, channel: chIdx, baseNote: BASE_NOTE,
+    buffer: buf, midi, channel: chIdx, baseNote: BASE_NOTE - instShift(inst),
     velocity: velocity != null ? velocity : 0.85,
     settings, destination: chains[chIdx].input,
   });
@@ -1209,7 +1247,7 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
       fadeStop(activeMap[c], t);
       const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.playbackRate.value = Math.pow(2, (ev.note - BASE_NOTE) / 12);
+      src.playbackRate.value = Math.pow(2, (ev.note + instShift(inst) - BASE_NOTE) / 12);
       const vg = ctx.createGain();
       vg.gain.value = (ev.vol == null ? 64 : ev.vol) / 64;
       src.connect(vg);
@@ -1674,6 +1712,12 @@ function renderVoiceSection() {
     (x) => Math.round(x * 100) + "%", (x) => { v.velToCutoff = x; }));
   p.appendChild(fxParamRow("Glide", 0, 0.5, 0.005, v.glide,
     (x) => (x < 0.001 ? "off" : fmtSec(x)), (x) => { v.glide = x; }));
+  // Pitch: whole semitones (speeds the sample up / slows it down).
+  // Tune: cents, to pull a slightly out-of-key sample into key.
+  p.appendChild(fxParamRow("Pitch", -24, 24, 1, inst.transpose || 0,
+    (x) => (x > 0 ? "+" : "") + x + " st", (x) => { inst.transpose = Math.round(x); }));
+  p.appendChild(fxParamRow("Tune", -100, 100, 1, inst.tune || 0,
+    (x) => (x > 0 ? "+" : "") + Math.round(x) + " ct", (x) => { inst.tune = Math.round(x); }));
   unit.appendChild(p);
 
   // Looping is what lets a short sample be held as a pad rather than
@@ -1855,7 +1899,7 @@ function previewCell(cell, ch) {
   ensureChains();
   const src = AC.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.value = Math.pow(2, (cell.note - BASE_NOTE) / 12);
+  src.playbackRate.value = Math.pow(2, (cell.note + instShift(inst) - BASE_NOTE) / 12);
   const vg = AC.createGain();
   vg.gain.value = (cell.vol == null ? 64 : cell.vol) / 64;
   src.connect(vg);
@@ -2200,7 +2244,16 @@ function renderInstruments() {
       autosave();
     });
 
-    item.append(num, label, editB, prev, x);
+    const loadB = document.createElement("button");
+    loadB.className = "mini-btn";
+    loadB.textContent = "\ud83d\udcc2";
+    loadB.title = "Load a WAV / MP3 from your computer into this slot";
+    loadB.addEventListener("click", (e) => {
+      e.stopPropagation();
+      replaceSlotWithFile(i);
+    });
+
+    item.append(num, label, loadB, editB, prev, x);
     item.addEventListener("click", () => {
       ui.curInstrument = i;
       renderInstruments();
@@ -2436,6 +2489,33 @@ async function deleteSample(path, name) {
   }
 }
 
+/* LOAD A FILE INTO A SLOT: pick a WAV / MP3 (or FLAC, OGG...) from the
+   computer; it goes into the library's imported/ folder and replaces the
+   slot's sound — every note using the slot plays the new file. */
+function replaceSlotWithFile(i) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "audio/*,.wav,.mp3,.ogg,.flac,.aiff,.aif,.m4a";
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload?folder=imported", { method: "POST", body: fd });
+    if (!res.ok) { toast("Couldn't load " + file.name); return; }
+    const { path } = await res.json();
+    buffers.delete(path);
+    try { await getBuffer(path); } catch (err) { toast("Couldn't read " + file.name + ": " + err.message); return; }
+    song.instruments[i].path = path;
+    song.instruments[i].name = file.name.replace(/\.[^.]+$/, "");
+    await refreshPalette();
+    renderInstruments();
+    autosave();
+    toast("Loaded " + file.name + " into slot " + fmt2(i + 1));
+  });
+  input.click();
+}
+
 /* upload */
 $("#btn-upload").addEventListener("click", () => $("#file-input").click());
 $("#btn-refresh").addEventListener("click", refreshPalette);
@@ -2628,6 +2708,35 @@ function applyProjectData(data, name) {
   }, 50);
 }
 
+/* BACKUPS: the last 4 versions of this project (newest first). Restoring one
+   makes it the current song — and the version it replaced becomes backup 1,
+   so a restore can itself be undone. */
+async function refreshBackupList() {
+  const sel = document.getElementById("backup-list");
+  if (!sel) return;
+  const name = $("#project-name").value.trim() || "untitled";
+  sel.innerHTML = '<option value="">Backups\u2026</option>';
+  try {
+    const { backups } = await (await fetch("/api/projects/" + encodeURIComponent(name) + "/backups")).json();
+    if (!backups.length) sel.add(new Option("(none yet)", "", false, false));
+    for (const b of backups) {
+      const t = new Date(b.saved * 1000).toLocaleTimeString();
+      sel.add(new Option(b.n === 1 ? "1 \u2014 just before the last save (" + t + ")" : b.n + " \u2014 " + t, String(b.n)));
+    }
+  } catch (err) { sel.add(new Option("(couldn't list)", "")); }
+}
+async function restoreBackup(n) {
+  const name = $("#project-name").value.trim() || "untitled";
+  const res = await fetch("/api/projects/" + encodeURIComponent(name) + "/backups/" + n);
+  if (!res.ok) { toast("Couldn't load backup " + n); return; }
+  const data = await res.json();
+  stopPlayback();
+  await restoreSamplesFromProject(data);
+  applyProjectData(data, name);
+  autosave();               // the restored version becomes current (and is saved)
+  toast("Restored backup " + n + " of " + name);
+}
+
 async function loadProject(name) {
   const res = await fetch("/api/projects/" + encodeURIComponent(name));
   if (!res.ok) { toast("Load failed"); return; }
@@ -2686,6 +2795,13 @@ $("#project-list").addEventListener("change", async (e) => {
   loadProject(name);
 });
 $("#project-name").addEventListener("change", autosave);
+$("#backup-list").addEventListener("focus", refreshBackupList);
+$("#backup-list").addEventListener("mousedown", refreshBackupList);
+$("#backup-list").addEventListener("change", (e) => {
+  const n = e.target.value;
+  e.target.value = "";
+  if (n) restoreBackup(n);
+});
 
 /* ================= export WAV ================= */
 function encodeWav(rendered) {
@@ -3318,6 +3434,27 @@ document.addEventListener("keydown", (e) => {
 $("#em-play").addEventListener("click", emPlay);
 $("#em-stop").addEventListener("click", emStop);
 $("#em-undo").addEventListener("click", emUndo);
+/* Load a file from the computer into the editor, in place of what's there
+   (undoable). Replace / Save then keep it like any other edit. */
+$("#em-loadfile").addEventListener("click", () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "audio/*,.wav,.mp3,.ogg,.flac,.aiff,.aif,.m4a";
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    let buf;
+    try { buf = await AC.decodeAudioData(await file.arrayBuffer()); }
+    catch (err) { toast("Couldn't read " + file.name); return; }
+    emStop();
+    if (em.buf) emPushUndo();
+    em.buf = buf;
+    em.sel = null;
+    emDraw();
+    toast("Loaded " + file.name + " \u2014 Replace or Save to keep it");
+  });
+  input.click();
+});
 $("#em-fadein").addEventListener("click", () => emFade(true));
 $("#em-fadeout").addEventListener("click", () => emFade(false));
 $("#em-normalize").addEventListener("click", emNormalize);

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hackbeat</title>
-<link rel="stylesheet" href="style.css?v=20260808b">
+<link rel="stylesheet" href="style.css?v=20261002a">
 </head>
 <body>
 
@@ -79,6 +79,8 @@
     <button id="btn-new" title="Start a blank project">New</button>
     <button id="btn-save">Save</button>
     <select id="project-list"><option value="">Load...</option></select>
+    <select id="backup-list" title="Undo: the last 4 saved versions of this project"><option value="">Backups…</option></select>
+    <span id="save-state" class="save-state" title="Every edit saves to the project file by itself"></span>
   </div>
 
   <button id="btn-export" class="accent">Export WAV</button>
@@ -183,6 +185,7 @@
       <button id="em-play">&#9654; Play</button>
       <button id="em-stop">&#9632;</button>
       <button id="em-undo">Undo</button>
+      <button id="em-loadfile" title="Load a WAV / MP3 from your computer into the editor (Undo brings the old sound back)">&#128194; Load file…</button>
       <span class="em-sep"></span>
       <button id="em-fadein">Fade In</button>
       <button id="em-fadeout">Fade Out</button>
@@ -616,8 +619,8 @@
 
 <div id="toast"></div>
 
-<script src="voices.js?v=20260808b"></script>
-<script src="piano.js?v=20260808b"></script>
-<script src="app.js?v=20260808b"></script>
+<script src="voices.js?v=20261002a"></script>
+<script src="piano.js?v=20261002a"></script>
+<script src="app.js?v=20261002a"></script>
 </body>
 </html>
