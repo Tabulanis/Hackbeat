@@ -179,7 +179,7 @@
       <span id="em-title">SAMPLE EDITOR</span>
       <button id="em-close" class="mini-btn">&#10005;</button>
     </div>
-    <canvas id="em-wave" width="920" height="200"></canvas>
+    <canvas id="em-wave" width="1500" height="320"></canvas>
     <div class="em-info" id="em-info">no sample loaded</div>
     <div class="em-row">
       <button id="em-play">&#9654; Play</button>
@@ -191,27 +191,29 @@
       <button id="em-fadeout">Fade Out</button>
       <button id="em-normalize">Normalize</button>
       <button id="em-trim">Trim</button>
+      <button id="em-onehit" title="Cut it down to its first clean note / hit">&#9986; One hit</button>
       <button id="em-cut">Cut</button>
       <button id="em-silence">Silence</button>
       <button id="em-reverse">Reverse</button>
       <button id="em-gdown">&minus;3dB</button>
       <button id="em-gup">+3dB</button>
     </div>
+    <div class="em-row em-fx-row">
+      <label class="em-lab">EFFECT</label>
+      <select id="em-fx"></select>
+      <label class="em-lab" id="em-fl0"></label><input id="em-fp0" class="em-fp" type="range"><span id="em-fv0" class="em-info em-fv"></span>
+      <label class="em-lab" id="em-fl1"></label><input id="em-fp1" class="em-fp" type="range"><span id="em-fv1" class="em-info em-fv"></span>
+      <label class="em-lab" id="em-fl2"></label><input id="em-fp2" class="em-fp" type="range"><span id="em-fv2" class="em-info em-fv"></span>
+      <span id="em-fx-none" class="em-info">no settings — use the envelope for how much</span>
+    </div>
     <div class="em-row">
-      <label class="em-lab">FX</label>
-      <select id="em-fx">
-        <option value="dist">Distortion</option>
-        <option value="crush">Bitcrush</option>
-        <option value="lowpass">Lowpass</option>
-        <option value="highpass">Highpass</option>
-        <option value="delay">Delay</option>
-        <option value="reverb">Reverb</option>
-      </select>
-      <label class="em-lab" id="em-p1-label">Drive</label>
-      <input id="em-p1" type="range" min="0" max="1" step="0.01" value="0.4">
-      <label class="em-lab" id="em-p2-label">Mix</label>
-      <input id="em-p2" type="range" min="0" max="1" step="0.01" value="0.4">
-      <button id="em-fxapply" class="accent">Apply FX</button>
+      <label class="em-lab">ENVELOPE</label>
+      <select id="em-env-preset" title="How much of the effect is in, over the length of the sound (or the selection)"></select>
+      <button id="em-env-edit" title="Click the wave to add points, drag them, double-click to remove">&#9998; Draw envelope</button>
+      <span class="em-sep"></span>
+      <button id="em-fxpreview" title="Hear it without keeping it">&#9654; Preview</button>
+      <button id="em-fxapply" class="accent">Apply</button>
+      <span class="em-info">applies to the selection if you've dragged one, else the whole sound</span>
     </div>
     <div class="em-row">
       <label class="em-lab">Speed</label>
@@ -619,8 +621,11 @@
 
 <div id="toast"></div>
 
+<script src="hbchain.js?v=20261002a"></script>
 <script src="voices.js?v=20261002a"></script>
 <script src="piano.js?v=20261002a"></script>
 <script src="app.js?v=20261002a"></script>
+<script src="emfx.js?v=20261002a"></script>
+<script>HB_EMFX.init();</script>
 </body>
 </html>

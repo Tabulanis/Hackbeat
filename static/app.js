@@ -189,163 +189,11 @@ async function getBuffer(path) {
   return buf;
 }
 
-/* ---------- fx chain ---------- */
-const impulseCache = new Map(); 
-function makeImpulse(ctx, decay) {
-  const key = (ctx === AC ? "rt" : "off") + ":" + decay.toFixed(2) + ":" + ctx.sampleRate;
-  if (impulseCache.has(key)) return impulseCache.get(key);
-  const len = Math.max(1, Math.floor(ctx.sampleRate * Math.min(6, decay)));
-  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-  
-  // Simulated room IR with algorithmic high-frequency dampening
-  let lpL = 0, lpR = 0;
-  const dL = buf.getChannelData(0);
-  const dR = buf.getChannelData(1);
-  for (let i = 0; i < len; i++) {
-    const env = Math.pow(1 - i / len, 3.0); 
-    const noiseL = (Math.random() * 2 - 1) * env;
-    const noiseR = (Math.random() * 2 - 1) * env;
-    lpL = lpL + 0.2 * (noiseL - lpL);
-    lpR = lpR + 0.2 * (noiseR - lpR);
-    dL[i] = lpL;
-    dR[i] = lpR;
-  }
-  impulseCache.set(key, buf);
-  return buf;
-}
-
-function distCurve(drive) {
-  const k = drive * 120;
-  const n = 1024;
-  const curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
-  }
-  return curve;
-}
-
-function bitcrushCurve(bits) {
-  const n = Math.pow(2, bits);
-  const curve = new Float32Array(4096);
-  for (let i = 0; i < 4096; i++) {
-    const x = (i / 4095) * 2 - 1;
-    curve[i] = Math.round(x * n) / n;
-  }
-  return curve;
-}
-
-function buildSendBuses(ctx, dest) {
-  const reverbIn = ctx.createGain();
-  const conv = ctx.createConvolver();
-  const reverbReturn = ctx.createGain();
-  reverbReturn.gain.value = 1;
-  reverbIn.connect(conv);
-  conv.connect(reverbReturn);
-  reverbReturn.connect(dest);
-
-  const delayIn = ctx.createGain();
-  const dl = ctx.createDelay(2.0);
-  const fb = ctx.createGain();
-  const delayReturn = ctx.createGain();
-  delayReturn.gain.value = 1;
-  delayIn.connect(dl);
-  dl.connect(fb);
-  fb.connect(dl);
-  dl.connect(delayReturn);
-  delayReturn.connect(dest);
-
-  return {
-    reverbIn,
-    delayIn,
-    setReverb(decay) { conv.buffer = makeImpulse(ctx, decay); },
-    setDelay(time, feedback) {
-      dl.delayTime.value = time;
-      fb.gain.value = Math.min(0.9, feedback);
-    },
-  };
-}
-
-function buildChain(ctx, dest, sendBuses) {
-  const input = ctx.createGain();
-
-  // Channel Strip
-  const panner = ctx.createStereoPanner();
-  const eqLow = ctx.createBiquadFilter(); eqLow.type = "lowshelf"; eqLow.frequency.value = 250;
-  const eqMid = ctx.createBiquadFilter(); eqMid.type = "peaking"; eqMid.frequency.value = 1000; eqMid.Q.value = 1.0;
-  const eqHigh = ctx.createBiquadFilter(); eqHigh.type = "highshelf"; eqHigh.frequency.value = 4000;
-
-  // Insert FX
-  const distShaper = ctx.createWaveShaper(); distShaper.oversample = "2x";
-  const crushShaper = ctx.createWaveShaper();
-
-  // Chorus
-  const chorusDry = ctx.createGain();
-  const chorusWet = ctx.createGain();
-  const chorusDelay = ctx.createDelay(); chorusDelay.delayTime.value = 0.03;
-  const lfo = ctx.createOscillator(); lfo.type = "sine";
-  const lfoGain = ctx.createGain();
-  lfo.connect(lfoGain); lfoGain.connect(chorusDelay.delayTime);
-  lfo.start(); 
-
-  const chanGain = ctx.createGain();
-  const reverbSend = ctx.createGain();
-  const delaySend = ctx.createGain();
-  reverbSend.gain.value = 0;
-  delaySend.gain.value = 0;
-
-  // Wiring Pipeline
-  input.connect(eqLow); eqLow.connect(eqMid); eqMid.connect(eqHigh); eqHigh.connect(panner);
-  panner.connect(distShaper); distShaper.connect(crushShaper);
-
-  crushShaper.connect(chorusDry); chorusDry.connect(chanGain);
-  crushShaper.connect(chorusDelay); chorusDelay.connect(chorusWet); chorusWet.connect(chanGain);
-
-  chanGain.connect(dest);
-  /* sends tapped post-fader: a muted/silent channel sends nothing,
-     matching how a real console's aux sends behave */
-  if (sendBuses) {
-    chanGain.connect(reverbSend); reverbSend.connect(sendBuses.reverbIn);
-    chanGain.connect(delaySend); delaySend.connect(sendBuses.delayIn);
-  }
-
-  const analyser = ctx.createAnalyser();
-  analyser.fftSize = 256;
-  chanGain.connect(analyser);
-
-  const chain = {
-    input,
-    analyser,
-    update(fx, audible) {
-      // Strip
-      chanGain.gain.value = audible ? fx.vol : 0;
-      panner.pan.value = fx.pan || 0;
-      eqLow.gain.value = fx.eq.low;
-      eqMid.gain.value = fx.eq.mid;
-      eqHigh.gain.value = fx.eq.high;
-
-      // Crush & Dist
-      distShaper.curve = fx.dist.on ? distCurve(fx.dist.drive) : null;
-      crushShaper.curve = fx.crush.on ? bitcrushCurve(fx.crush.bits) : null;
-
-      // Chorus
-      if (fx.chorus.on) {
-        lfo.frequency.value = fx.chorus.rate;
-        lfoGain.gain.value = fx.chorus.depth;
-        chorusWet.gain.value = fx.chorus.mix;
-        chorusDry.gain.value = 1.0 - fx.chorus.mix;
-      } else {
-        chorusWet.gain.value = 0;
-        chorusDry.gain.value = 1;
-      }
-
-      // Sends (bus character - decay/time/feedback - is global; see song.fxBus)
-      delaySend.gain.value = fx.delay.on ? fx.delay.send : 0;
-      reverbSend.gain.value = fx.reverb.on ? fx.reverb.send : 0;
-    },
-  };
-  return chain;
-}
+/* ---------- fx chain ----------
+   The track chain (EQ, pan, drive, crush, chorus, delay + reverb sends) lives
+   in hbchain.js, shared word for word with Garden Rhythm so a track sounds
+   the same in the game as it does here. */
+const { makeImpulse, distCurve, bitcrushCurve, buildSendBuses, buildChain } = HB_CHAIN;
 
 let chains = []; // realtime, one per channel
 const sendBuses = buildSendBuses(AC, master);
@@ -680,6 +528,7 @@ function renderGrid() {
         updateSelectionVisuals();
         grid.focus();
         e.preventDefault();
+        if (!e.shiftKey && e.button === 0 && cellEvents(curPat().data[r][i]).length) startNoteDrag(e, r, i, cellEl);
       });
       cellEl.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -738,6 +587,8 @@ function paintCell(el, cell, r, c) {
   const hasNote = cellEvents(cell).some((ev) => ev.note !== NOTE_OFF);
   el.classList.toggle("has-note", hasNote);
   if (hasNote) el.style.setProperty("--tint-bg", chTint(c, 0.13));
+  el.classList.toggle("nudged", !!(cell && cell.off));
+  if (cell && cell.off) el.style.setProperty("--nudge", cell.off);
   const isCur = r === ui.cursor.row && c === ui.cursor.ch;
 
   if (cell && cell.split && cell.subs) {
@@ -772,6 +623,57 @@ function paintCell(el, cell, r, c) {
   el.appendChild(mk(fmt2(inst), "s-inst", 1));
   el.appendChild(document.createTextNode(" "));
   el.appendChild(mk(vol == null ? "v.." : "v" + String(vol).padStart(2, "0"), "s-vol", 2));
+}
+
+/* DRAG A NOTE: press on a note and slide it left/right. It lands exactly
+   where you let go — whole rows move the note, anything in between is a
+   nudge off the grid (cell.off, shown as a tick where the note really
+   starts). Within a few % of a row it snaps back onto the grid. */
+function startNoteDrag(e, r, c, el) {
+  const x0 = e.clientX, cellW = el.offsetWidth || 1;
+  const start = r + (curPat().data[r][c].off || 0);
+  let moved = false;
+  const where = (ev) => {
+    const pos = Math.max(-0.49, Math.min(curPat().rows - 0.51, start + (ev.clientX - x0) / cellW));
+    const row = Math.round(pos), off = pos - row;
+    return { row, off: Math.abs(off) < 0.06 ? 0 : off };
+  };
+  const move = (ev) => {
+    const dx = ev.clientX - x0;
+    if (!moved && Math.abs(dx) < 4) return;
+    moved = true;
+    el.classList.add("dragging");
+    el.style.transform = "translateX(" + dx + "px)";
+    const w = where(ev);
+    el.dataset.drag = "row " + w.row + (w.off ? (w.off > 0 ? " +" : " ") + w.off.toFixed(2) : " (on grid)");
+  };
+  const up = (ev) => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    el.classList.remove("dragging");
+    el.style.transform = "";
+    if (!moved) return;
+    gridLastClick = null;
+    const w = where(ev);
+    moveNote(r, c, w.row, w.off);
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
+function moveNote(r, c, row, off) {
+  const pat = curPat(), cell = pat.data[r][c];
+  if (!cell) return;
+  if (row !== r && cellEvents(pat.data[row][c]).length) {
+    toast("Row " + row + " already has a note on this track");
+    return;
+  }
+  pat.data[r][c] = null;
+  pat.data[row][c] = cell;
+  if (off) cell.off = Math.round(off * 1000) / 1000; else delete cell.off;
+  renderGrid();
+  setCursor(row, c, 0, 0);
+  scheduleWaveDraw();
+  autosave();
 }
 
 function repaintCell(r, c) {
@@ -822,17 +724,19 @@ function getOrMakeCell(r, c, patIdx) {
 /* ---- cell splitting: one cell can hold 2/3/4 evenly-timed hits ---- */
 function cellEvents(cell) {
   // normalize any cell into [{frac, note, inst, vol}] - frac is 0..1 within the row
+  // cell.off = a dragged note's nudge off the grid, in rows (-0.5 .. 0.5)
   if (!cell) return [];
+  const off = cell.off || 0;
   if (cell.split && cell.subs) {
     const out = [];
     cell.subs.forEach((sub, i) => {
       if (sub && sub.note != null) {
-        out.push({ frac: i / cell.split, note: sub.note, inst: sub.inst, vol: sub.vol });
+        out.push({ frac: i / cell.split + off, note: sub.note, inst: sub.inst, vol: sub.vol });
       }
     });
     return out;
   }
-  if (cell.note != null) return [{ frac: 0, note: cell.note, inst: cell.inst, vol: cell.vol }];
+  if (cell.note != null) return [{ frac: off, note: cell.note, inst: cell.inst, vol: cell.vol }];
   return [];
 }
 
@@ -2901,15 +2805,6 @@ const em = {
 };
 let emCellTarget = null; // {row, ch, slot, instNum} when opened via right-click
 
-const FX_DEFS = {
-  dist:     { p1: "Drive",  p2: "\u2014" },
-  crush:    { p1: "Depth",  p2: "\u2014" },
-  lowpass:  { p1: "Cutoff", p2: "Res" },
-  highpass: { p1: "Cutoff", p2: "Res" },
-  delay:    { p1: "Time",   p2: "Mix" },
-  reverb:   { p1: "Decay",  p2: "Mix" },
-};
-
 function copyBuffer(src) {
   const b = AC.createBuffer(src.numberOfChannels, src.length, src.sampleRate);
   for (let c = 0; c < src.numberOfChannels; c++) {
@@ -2940,7 +2835,6 @@ async function openEditor(path, name) {
   $("#em-replace").disabled = !em.path;
   $("#em-recstatus").textContent = "";
   $("#em-overlay").hidden = false;
-  emUpdateFxLabels();
   emDraw();
 }
 
@@ -2988,6 +2882,7 @@ function emDraw() {
   const selTxt = em.sel
     ? " \u00b7 sel " + ((em.sel.b - em.sel.a) / em.buf.sampleRate).toFixed(2) + "s"
     : " \u00b7 drag to select";
+  if (window.HB_EMFX) HB_EMFX.drawEnvelope();
   $("#em-info").textContent =
     (em.buf.length / em.buf.sampleRate).toFixed(2) + "s \u00b7 " +
     em.buf.sampleRate + "Hz \u00b7 " + em.buf.numberOfChannels + "ch" + selTxt;
@@ -3003,7 +2898,7 @@ function emDraw() {
     return Math.round(frac * (em.buf ? em.buf.length : 0));
   };
   cv.addEventListener("pointerdown", (e) => {
-    if (!em.buf) return;
+    if (!em.buf || (window.HB_EMFX && HB_EMFX.env.edit)) return;
     cv.setPointerCapture(e.pointerId);
     dragA = toSample(e);
     em.sel = null;
@@ -3127,70 +3022,6 @@ function emKeep(trim) {
 }
 
 /* destructive fx via offline render (reuses the engine's curves/impulses) */
-async function emApplyFx() {
-  if (!em.buf) { toast("No audio loaded"); return; }
-  const kind = $("#em-fx").value;
-  const p1 = parseFloat($("#em-p1").value);
-  const p2 = parseFloat($("#em-p2").value);
-  const tail = (kind === "delay" || kind === "reverb") ? 2.0 : 0;
-  const oc = new OfflineAudioContext(
-    em.buf.numberOfChannels,
-    em.buf.length + Math.ceil(tail * em.buf.sampleRate),
-    em.buf.sampleRate
-  );
-  const src = oc.createBufferSource();
-  src.buffer = em.buf;
-  let node = src;
-  const chainTo = (n) => { node.connect(n); node = n; };
-
-  if (kind === "dist") {
-    const sh = oc.createWaveShaper();
-    sh.oversample = "2x";
-    sh.curve = distCurve(0.02 + p1 * 0.98);
-    chainTo(sh);
-  } else if (kind === "crush") {
-    const sh = oc.createWaveShaper();
-    sh.curve = bitcrushCurve(Math.round(12 - p1 * 10)); // depth 0..1 -> 12..2 bits
-    chainTo(sh);
-  } else if (kind === "lowpass" || kind === "highpass") {
-    const bq = oc.createBiquadFilter();
-    bq.type = kind;
-    bq.frequency.value = 40 * Math.pow(400, p1); // 40 Hz .. 16 kHz, log
-    bq.Q.value = 0.5 + p2 * 12;
-    chainTo(bq);
-  } else if (kind === "delay") {
-    const sum = oc.createGain();
-    const dry = oc.createGain();
-    const wet = oc.createGain();
-    const dl = oc.createDelay(2);
-    const fb = oc.createGain();
-    node.connect(dry); dry.connect(sum);
-    node.connect(dl); dl.connect(fb); fb.connect(dl);
-    dl.connect(wet); wet.connect(sum);
-    dl.delayTime.value = 0.02 + p1 * 0.98;
-    fb.gain.value = 0.4;
-    wet.gain.value = p2;
-    node = sum;
-  } else if (kind === "reverb") {
-    const sum = oc.createGain();
-    const dry = oc.createGain();
-    const wet = oc.createGain();
-    const conv = oc.createConvolver();
-    conv.buffer = makeImpulse(oc, 0.2 + p1 * 5.8);
-    node.connect(dry); dry.connect(sum);
-    node.connect(conv); conv.connect(wet); wet.connect(sum);
-    wet.gain.value = p2;
-    node = sum;
-  }
-  node.connect(oc.destination);
-  src.start();
-  emPushUndo();
-  em.buf = await oc.startRendering();
-  em.sel = null;
-  emDraw();
-  toast("Applied " + kind);
-}
-
 function emPlay() {
   if (!em.buf) return;
   emStop();
@@ -3414,16 +3245,6 @@ async function emSave(overwrite) {
   toast((overwrite ? "Replaced: " : "Saved: ") + saved);
 }
 
-$("#em-fx").addEventListener("change", emUpdateFxLabels);
-function emUpdateFxLabels() {
-  const def = FX_DEFS[$("#em-fx").value];
-  $("#em-p1-label").textContent = def.p1;
-  $("#em-p2-label").textContent = def.p2;
-  const hideP2 = def.p2 === "\u2014";
-  $("#em-p2").style.visibility = hideP2 ? "hidden" : "visible";
-  $("#em-p2-label").style.visibility = hideP2 ? "hidden" : "visible";
-}
-
 $("#em-close").addEventListener("click", closeEditor);
 $("#em-overlay").addEventListener("mousedown", (e) => {
   if (e.target === $("#em-overlay")) closeEditor();
@@ -3464,7 +3285,6 @@ $("#em-silence").addEventListener("click", emSilence);
 $("#em-reverse").addEventListener("click", emReverse);
 $("#em-gdown").addEventListener("click", () => emGain(-3));
 $("#em-gup").addEventListener("click", () => emGain(3));
-$("#em-fxapply").addEventListener("click", () => emApplyFx().catch((e) => toast(e.message)));
 
 /* speed/pitch: real time-stretch and pitch-shift (independent of each other),
    not a naive resample — that always couples the two. Web Audio has no

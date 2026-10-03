@@ -500,8 +500,8 @@ input[type="range"] {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  width: min(960px, 94vw);
-  max-height: 92vh;
+  width: min(1560px, 97vw);
+  max-height: 96vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -518,7 +518,7 @@ input[type="range"] {
 }
 #em-wave {
   width: 100%;
-  height: 200px;
+  height: 320px;
   background: #0b0d10;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -529,7 +529,6 @@ input[type="range"] {
 .em-lab { color: var(--dim); font-size: 11px; flex: 0 0 auto; }
 .em-info { color: var(--dim); font-size: 11px; font-family: var(--mono); }
 .em-sep { width: 1px; height: 18px; background: var(--line); }
-#em-p1, #em-p2 { width: 110px; accent-color: var(--amber); padding: 0; }
 #em-name { flex: 1; min-width: 120px; }
 #em-record.recording, #gen-hum.recording, #btn-sing.recording { background: #6b2f2f; border-color: #d05050; color: #ffd6d6; }
 
@@ -854,3 +853,14 @@ body:has(#keyboard-dock:not(.hidden)) #workspace {
 
 /* autosave-to-file indicator */
 .save-state { font-size: 11px; color: #8b92a0; margin-left: 6px; min-width: 70px; display: inline-block; }
+
+/* effects rack */
+.em-fp { width: 130px; accent-color: var(--amber); padding: 0; }
+.em-fv { min-width: 52px; }
+#em-fx { max-width: 230px; }
+
+/* dragged notes: a tick where a nudged note really starts; a label while dragging */
+.pcell { position: relative; }
+.pcell.nudged::after { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); left: clamp(0%, calc(var(--nudge) * 100%), 97%); }
+.pcell.dragging { z-index: 5; opacity: 0.85; outline: 1px dashed var(--amber); cursor: grabbing; overflow: visible; }
+.pcell.dragging::before { content: attr(data-drag); position: absolute; top: -16px; left: 0; font-size: 10px; color: var(--amber); white-space: nowrap; }
