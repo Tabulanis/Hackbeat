@@ -118,22 +118,25 @@ function autosave() {
    written to its file (the server keeps the previous 4 versions as backups —
    the Backups menu restores them). Loading a project doesn't trigger it:
    loadProject/saveProject clear `dirty` right after their own autosave(). */
-let fileSaveTimer = 0;
+let fileSaveTimer = 0, editSeq = 0;
 function scheduleFileSave() {
+  editSeq++;
   clearTimeout(fileSaveTimer);
   fileSaveTimer = setTimeout(fileSaveNow, 1000);
 }
 async function fileSaveNow() {
   if (!dirty) return;
   const name = $("#project-name").value.trim() || "untitled";
+  const seq = editSeq;
   setSaveState("saving…");
   try {
     const res = await fetch("/api/projects/" + encodeURIComponent(name) + "?autosave=1", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(serialize()),
+      body: JSON.stringify(await serializeWithSamples()),   // the samples live inside the file
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
+    if (seq !== editSeq) return;   // edited while saving: the newer save is already scheduled
     dirty = false;
     setSaveState("saved ✓");
   } catch (err) {
@@ -2406,24 +2409,28 @@ function serialize() {
 /** Base64-encodes one sample's audio, re-rendering it as WAV through the
  * same encodeWav() used everywhere else in the editor -- consistent
  * output regardless of the sample's original file format. */
+// encoded once per decoded sound: a changed sound is a new buffer, so it re-encodes
+const b64Cache = new WeakMap();
 async function sampleToBase64(path) {
   const buf = await getBuffer(path);
+  if (b64Cache.has(buf)) return b64Cache.get(buf);
   const blob = encodeWav(buf);
-  return new Promise((resolve, reject) => {
+  const b64 = await new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).split(",")[1]);
     r.onerror = () => reject(new Error("Could not encode " + path));
     r.readAsDataURL(blob);
   });
+  b64Cache.set(buf, b64);
+  return b64;
 }
 
 /** serialize() alone only stores sample *paths* -- if the shared library
  * changes later (a sample gets deleted, overwritten, or this project is
- * moved elsewhere), a project saved that way can silently break. Only
- * used by an explicit named Save, NOT by autosave: autosave fires on
- * nearly every keystroke, and re-encoding every referenced sample to
- * base64 that often would be slow and would blow past localStorage's
- * size limit fast. A deliberate Save is rare enough to afford it. */
+ * moved elsewhere), a project saved that way can silently break. So every
+ * save to the FILE -- Save and the autosave a second after each edit --
+ * carries the samples inside it (encoded once per sound, see b64Cache).
+ * The quick localStorage autosave stays paths-only (it has a size limit). */
 async function serializeWithSamples() {
   const base = serialize();
   const paths = [...new Set(song.instruments.map((i) => i.path))];
@@ -3373,14 +3380,17 @@ $("#btn-rec").addEventListener("click", () => openEditor(null, "recording"));
 /* =====================================================================
    The demo song ("Dope", the owner's, 2026-10-02) — so the very first
    Space press makes music. Only used when there is no autosave, i.e. the
-   first open ever. Its sounds ship in samples/demo/; it opens under its own
-   name (dope-demo) so edits save to a project of the user's own.
+   first open ever. One file with its samples inside (static/demo/Dope.json,
+   a copy of the owner's saved project); it opens under its own name
+   (dope-demo) so edits save to a project of the user's own.
    ===================================================================== */
 async function loadDemoSong() {
   try {
-    const res = await fetch("demo/dope.json");
+    const res = await fetch("demo/Dope.json");
     if (!res.ok) throw new Error("HTTP " + res.status);
-    applyProjectData(await res.json(), "dope-demo");
+    const data = await res.json();
+    await restoreSamplesFromProject(data);   // its sounds, from inside the file
+    applyProjectData(data, "dope-demo");
   } catch (err) {
     console.warn("Demo song didn't load, starting blank", err);
     applyProjectData(newSongData(), "untitled");
