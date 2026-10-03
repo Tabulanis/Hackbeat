@@ -166,8 +166,10 @@ class Voice {
  * of held keys doesn't turn to mush.
  */
 class VoicePool {
-  constructor(ctx) {
+  /** max: how many may sound at once (phones: fewer — each voice is a filter and a gain) */
+  constructor(ctx, { max = MAX_VOICES } = {}) {
     this.ctx = ctx;
+    this.max = max;
     this.active = [];               // Voice[]
     this.held = new Map();          // "ch:midi" -> Voice, for key-up matching
   }
@@ -181,15 +183,18 @@ class VoicePool {
     const existing = this.held.get(k);
     if (existing) existing.release();
 
-    if (this.active.length >= MAX_VOICES) {
-      // steal the oldest that's already fading, else the plain oldest
-      const idx = this.active.findIndex((v) => v.released);
+    if (this.active.length >= this.max) {
+      // steal the oldest that's already fading, else the plain oldest —
+      // never a `keep` voice (a background loop) while anything else can go
+      let idx = this.active.findIndex((v) => v.released && !v.keep);
+      if (idx < 0) idx = this.active.findIndex((v) => !v.keep);
       const victim = this.active.splice(idx >= 0 ? idx : 0, 1)[0];
       if (victim) victim.kill();
     }
 
     const v = new Voice(this.ctx, opts.buffer, opts);
     v.channel = opts.channel;
+    v.keep = !!opts.keep;
     this.active.push(v);
     this.held.set(k, v);
     v.src.addEventListener("ended", () => {
