@@ -400,6 +400,114 @@ function drawWaveOverlay() {
   }
 }
 
+/* ================= track selection + MIX TO SAMPLE =================
+   Ctrl+click track headers to select several (Shift+click: a range; Esc
+   clears). "Mix to sample" renders the selected tracks over the whole song
+   through their own effects -- muted / un-soloed tracks stay silent, as in
+   playback -- and puts the WAV in the palette (samples/mixdowns/). The reverb
+   and echo tails wrap round to the start, so it loops seamlessly: a
+   ready-made background track. */
+const trackSel = new Set();
+let trackSelAnchor = null;
+function pickTrack(i, range) {
+  if (range && trackSelAnchor != null) {
+    const [a, b] = [Math.min(trackSelAnchor, i), Math.max(trackSelAnchor, i)];
+    for (let k = a; k <= b; k++) trackSel.add(k);
+  } else {
+    if (trackSel.has(i)) trackSel.delete(i); else trackSel.add(i);
+    trackSelAnchor = i;
+  }
+  refreshTrackSel();
+}
+function refreshTrackSel() {
+  document.querySelectorAll(".ch-hdr").forEach((h, k) => h.classList.toggle("ch-picked", trackSel.has(k)));
+  const b = $("#btn-mix");
+  b.disabled = !trackSel.size;
+  b.textContent = trackSel.size ? "Mix " + trackSel.size + " track" + (trackSel.size > 1 ? "s" : "") + " \u2192 sample" : "Mix to sample";
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && trackSel.size && $("#em-overlay").hidden) { trackSel.clear(); refreshTrackSel(); }
+});
+
+/** Render the song offline. only: channel indices to include (null = all). */
+async function renderSong({ only = null, master: masterGain = 1, limiter = false, tail = 3 } = {}) {
+  const sequence = song.order.length ? song.order : song.patterns.map((_, i) => i);
+  const spr = secPerRow();
+  let totalRows = 0;
+  for (const p of sequence) totalRows += song.patterns[p].rows;
+  if (totalRows === 0) return null;
+  const rate = 48000;
+  const oc = new OfflineAudioContext(2, Math.ceil((totalRows * spr + tail) * rate), rate);
+  const om = oc.createGain();
+  om.gain.value = masterGain;
+  if (limiter) {
+    const olim = oc.createDynamicsCompressor();
+    olim.threshold.value = -3.0; olim.knee.value = 12.0; olim.ratio.value = 4.0;
+    olim.attack.value = 0.01; olim.release.value = 0.1;
+    om.connect(olim); olim.connect(oc.destination);
+  } else om.connect(oc.destination);
+  const offSendBuses = buildSendBuses(oc, om);
+  offSendBuses.setReverb(song.fxBus.reverbDecay);
+  offSendBuses.setDelay(song.fxBus.delayTime, song.fxBus.delayFb);
+  const offChains = song.channels.map((ch, i) => {
+    const chain = buildChain(oc, om, offSendBuses);
+    // muted / un-soloed tracks stay silent, as in playback; a mixdown also leaves out unselected ones
+    chain.update(ch.fx, channelAudible(i) && (!only || only.has(i)));
+    return chain;
+  });
+  const offActive = {};
+  let t = only ? 0 : 0.02;   // a mixdown starts exactly on the song's first beat (it loops)
+  for (const p of sequence) {
+    const pat = song.patterns[p];
+    for (let r = 0; r < pat.rows; r++) {
+      scheduleRow(p, r, t, oc, offChains, offActive);
+      t += spr;
+    }
+  }
+  const rendered = await oc.startRendering();
+  return { rendered, songSeconds: totalRows * spr };
+}
+
+async function mixToSample() {
+  if (!trackSel.size) { toast("Ctrl+click track names to pick what goes in the mix"); return; }
+  const picked = [...trackSel].sort((a, b) => a - b);
+  const audible = picked.filter((i) => channelAudible(i));
+  if (!audible.length) { toast("Every picked track is muted (or not soloed)"); return; }
+  toast("Mixing " + audible.length + " track" + (audible.length > 1 ? "s" : "") + "\u2026");
+  for (const ins of song.instruments) { try { await getBuffer(ins.path); } catch (_) {} }   // every sample decoded first
+  const out = await renderSong({ only: new Set(picked), tail: 6 });
+  if (!out) { toast("Nothing to mix"); return; }
+  // wrap the tail round onto the start: a seamless loop of exactly the song's length
+  const { rendered, songSeconds } = out;
+  const n = Math.round(songSeconds * rendered.sampleRate);
+  const loop = new AudioBuffer({ numberOfChannels: 2, length: n, sampleRate: rendered.sampleRate });
+  for (let c = 0; c < 2; c++) {
+    const src = rendered.getChannelData(c), dst = loop.getChannelData(c);
+    for (let i = 0; i < src.length; i++) dst[i % n] += src[i];
+  }
+  // a mix that would clip (tracks summed without the master's headroom) comes down to a safe peak
+  let peak = 0;
+  for (let c = 0; c < 2; c++) for (const v of loop.getChannelData(c)) peak = Math.max(peak, Math.abs(v));
+  if (peak > 0.9) for (let c = 0; c < 2; c++) { const d = loop.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= 0.9 / peak; }
+  const proj = ($("#project-name").value.trim() || "song").replace(/[^A-Za-z0-9_-]+/g, "-");
+  const names = audible.map((i) => song.channels[i].name.trim().replace(/[^A-Za-z0-9]+/g, "-")).join("+").slice(0, 60);
+  // never overwrite: a re-mix is a new file (name-2, name-3...), so nothing using an old mix changes
+  const wav = encodeWav(loop);
+  let rel = null;
+  for (let k = 1; k < 100 && !rel; k++) {
+    const tryRel = "mixdowns/" + proj + "_" + names + (k > 1 ? "-" + k : "") + ".wav";
+    const res = await fetch("/api/sample/save?path=" + encodeURIComponent(tryRel) + "&overwrite=0", {
+      method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav,
+    });
+    if (res.ok) rel = tryRel;
+    else if (res.status !== 409) { toast("Couldn't save the mix"); return; }
+  }
+  if (!rel) { toast("Couldn't save the mix"); return; }
+  await refreshPalette();
+  const skipped = picked.length - audible.length;
+  toast("Mixed into the palette: " + rel + (skipped ? " (" + skipped + " muted track" + (skipped > 1 ? "s" : "") + " left out)" : ""));
+}
+
 function renderGrid() {
   const pat = curPat();
   grid.innerHTML = "";
@@ -475,6 +583,13 @@ function renderGrid() {
     vu.style.display = ui.showVU ? "" : "none";
     vuCanvases[i] = vu;
     hdr.append(name, chTop, vu);
+    hdr.classList.toggle("ch-picked", trackSel.has(i));
+    // Ctrl+click toggles this track in the selection, Shift+click picks a range (plain click = rename)
+    hdr.addEventListener("mousedown", (e) => {
+      if (!(e.ctrlKey || e.metaKey || e.shiftKey)) return;
+      e.preventDefault();
+      pickTrack(i, e.shiftKey);
+    });
     lane.appendChild(hdr);
 
     for (let r = 0; r < pat.rows; r++) {
@@ -2689,61 +2804,19 @@ function encodeWav(rendered) {
 }
 
 async function exportWav() {
-  const sequence = song.order.length
-    ? song.order
-    : song.patterns.map((_, i) => i); // no order set: export the whole song
-  const spr = secPerRow();
-  let totalRows = 0;
-  for (const p of sequence) totalRows += song.patterns[p].rows;
-  if (totalRows === 0) { toast("Nothing to export"); return; }
   toast("Rendering...");
-
-  // Hardcode offline export to pristine 48000 Hz target format
-  const rate = 48000;
-  const tail = 3; 
-  const oc = new OfflineAudioContext(2, Math.ceil((totalRows * spr + tail) * rate), rate);
-  const om = oc.createGain();
-  om.gain.value = master.gain.value; 
-  
-  const olim = oc.createDynamicsCompressor();
-  olim.threshold.value = -3.0; 
-  olim.knee.value = 12.0;
-  olim.ratio.value = 4.0;
-  olim.attack.value = 0.01;
-  olim.release.value = 0.1;
-  
-  om.connect(olim);
-  olim.connect(oc.destination);
-
-  const offSendBuses = buildSendBuses(oc, om);
-  offSendBuses.setReverb(song.fxBus.reverbDecay);
-  offSendBuses.setDelay(song.fxBus.delayTime, song.fxBus.delayFb);
-  const offChains = song.channels.map((ch, i) => {
-    const chain = buildChain(oc, om, offSendBuses);
-    chain.update(ch.fx, channelAudible(i));
-    return chain;
-  });
-  const offActive = {};
-
-  let t = 0.02;
-  for (const p of sequence) {
-    const pat = song.patterns[p];
-    for (let r = 0; r < pat.rows; r++) {
-      scheduleRow(p, r, t, oc, offChains, offActive);
-      t += spr;
-    }
-  }
-
-  const rendered = await oc.startRendering();
-  const blob = encodeWav(rendered);
+  const out = await renderSong({ master: master.gain.value, limiter: true, tail: 3 });
+  if (!out) { toast("Nothing to export"); return; }
+  const blob = encodeWav(out.rendered);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = ($("#project-name").value.trim() || "hackbeat") + ".wav";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast("Exported WAV (" + Math.round(totalRows * spr) + "s + tail)");
+  toast("Exported WAV (" + Math.round(out.songSeconds) + "s + tail)");
 }
 $("#btn-export").addEventListener("click", () => exportWav().catch((e) => toast(e.message)));
+$("#btn-mix").addEventListener("click", () => mixToSample().catch((e) => toast(e.message)));
 
 /* ================= sample editor ================= */
 const em = {
