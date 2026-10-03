@@ -42,6 +42,14 @@ function voiceSettings(inst) {
   return Object.assign({}, DEFAULT_VOICE, (inst && inst.voice) || {});
 }
 
+/** Has this instrument's voice been shaped (any setting off the default)?
+ *  Song playback only plays through the voice when it has — an untouched
+ *  instrument keeps playing its sample straight, as it always did. */
+function voiceShaped(inst) {
+  const v = inst && inst.voice;
+  return !!v && Object.keys(DEFAULT_VOICE).some((k) => v[k] != null && v[k] !== DEFAULT_VOICE[k]);
+}
+
 /**
  * One playing note. Kept as an object rather than a bare AudioBufferSource
  * so it can be released later — the thing the old code had no way to do.
@@ -237,5 +245,5 @@ const VOICE_PRESETS = {
 };
 
 window.HB_VOICES = {
-  DEFAULT_VOICE, VOICE_PRESETS, MAX_VOICES, Voice, VoicePool, voiceSettings,
+  DEFAULT_VOICE, VOICE_PRESETS, MAX_VOICES, Voice, VoicePool, voiceSettings, voiceShaped,
 };

@@ -338,6 +338,16 @@ def generate(req: GenRequest):
         GEN_LOCK.release()
 
 
+@app.middleware("http")
+async def _always_fresh(request: Request, call_next):
+    # the app's own files: the browser must re-check every time (cheap, it's
+    # local) so a reload always runs the current code, never a stale copy
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
 
 if __name__ == "__main__":

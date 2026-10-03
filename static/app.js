@@ -1122,6 +1122,7 @@ const channelActive = {};
 const DECLICK = 0.012;
 function fadeStop(active, t) {
   if (!active) return;
+  if (active.voice) { active.voice.release(t); return; }   // a shaped voice: its own release
   try {
     const g = active.vg.gain;
     g.cancelScheduledValues(t);
@@ -1149,6 +1150,16 @@ function scheduleRow(patIdx, row, time, ctx, chainSet, activeMap) {
       const buf = buffers.get(inst.path);
       if (!buf) continue;
       fadeStop(activeMap[c], t);
+      if (HB_VOICES.voiceShaped(inst)) {
+        // the INSTRUMENT VOICE panel shapes song playback too: envelope, tone,
+        // hold/loop — released when the channel's next note (or ===) comes
+        const voice = new HB_VOICES.Voice(ctx, buf, {
+          settings: HB_VOICES.voiceSettings(inst), midi: ev.note + instShift(inst), baseNote: BASE_NOTE,
+          velocity: (ev.vol == null ? 64 : ev.vol) / 64, when: t, destination: chainSet[c].input,
+        });
+        activeMap[c] = { voice };
+        continue;
+      }
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.playbackRate.value = Math.pow(2, (ev.note + instShift(inst) - BASE_NOTE) / 12);
