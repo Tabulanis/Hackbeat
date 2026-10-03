@@ -182,6 +182,12 @@ class VoicePool {
     const k = VoicePool.key(opts.channel, opts.midi);
     const existing = this.held.get(k);
     if (existing) existing.release();
+    // mono: one voice per channel, like a tracker track — a new note cuts the
+    // channel's earlier notes at its start (notes scheduled later stay)
+    if (opts.mono) {
+      const when = opts.when != null ? opts.when : this.ctx.currentTime;
+      for (const v of this.active) if (v.channel === opts.channel && !v.released && v.started < when - 1e-4) v.release(when);
+    }
 
     if (this.active.length >= this.max) {
       // steal the oldest that's already fading, else the plain oldest —
