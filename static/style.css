@@ -877,3 +877,7 @@ body:has(#keyboard-dock:not(.hidden)) #workspace {
 
 /* tracks picked for Mix to sample */
 .ch-hdr.ch-picked { box-shadow: inset 3px 0 0 var(--amber); background: rgba(242,163,60,0.12); }
+
+/* a mix that just landed in the library */
+.sample-item.just-made { animation: just-made 1s ease-in-out 4; background: rgba(242,163,60,0.25); }
+@keyframes just-made { 50% { background: rgba(242,163,60,0.55); } }

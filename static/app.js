@@ -504,6 +504,13 @@ async function mixToSample() {
   }
   if (!rel) { toast("Couldn't save the mix"); return; }
   await refreshPalette();
+  // show it: scroll the library to the new mix and flash it
+  const item = [...document.querySelectorAll("#palette-list .sample-item")].find((x) => x.title === rel);
+  if (item) {
+    item.scrollIntoView({ block: "center", behavior: "smooth" });
+    item.classList.add("just-made");
+    setTimeout(() => item.classList.remove("just-made"), 4000);
+  }
   const skipped = picked.length - audible.length;
   toast("Mixed into the palette: " + rel + (skipped ? " (" + skipped + " muted track" + (skipped > 1 ? "s" : "") + " left out)" : ""));
 }
@@ -2816,7 +2823,14 @@ async function exportWav() {
   toast("Exported WAV (" + Math.round(out.songSeconds) + "s + tail)");
 }
 $("#btn-export").addEventListener("click", () => exportWav().catch((e) => toast(e.message)));
-$("#btn-mix").addEventListener("click", () => mixToSample().catch((e) => toast(e.message)));
+$("#btn-mix").addEventListener("click", async () => {
+  const b = $("#btn-mix");
+  if (b.dataset.busy) return;
+  b.dataset.busy = "1"; b.disabled = true; b.textContent = "Mixing\u2026";
+  try { await mixToSample(); } catch (e) { toast(e.message); }
+  delete b.dataset.busy;
+  refreshTrackSel();
+});
 
 /* ================= sample editor ================= */
 const em = {
