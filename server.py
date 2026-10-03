@@ -2,7 +2,7 @@
 """Hackbeat — tracker/timeline sample editor. FastAPI backend.
 
 Serves the static frontend, the sample library, and project save/load.
-Phase 2 (AI sample generation) plugs into /api/generate.
+The sound finder (library.py) finds real recordings by description: /api/library/*.
 """
 import json
 import re
@@ -42,7 +42,9 @@ def safe_child(base: Path, rel: str) -> Path:
 @app.get("/api/samples")
 def list_samples():
     items = []
-    for p in sorted(SAMPLES.rglob("*")):
+    # the big sound-finder library (samples/library) stays out of the palette;
+    # a found sound is copied into samples/found/ when you take it
+    for p in sorted(q for q in SAMPLES.rglob("*") if "library" not in q.relative_to(SAMPLES).parts[:1]):
         if p.is_file() and p.suffix.lower() in AUDIO_EXT:
             rel = p.relative_to(SAMPLES).as_posix()
             folder = str(Path(rel).parent)
@@ -209,133 +211,79 @@ def load_backup(name: str, n: int):
     return JSONResponse(json.loads(p.read_text()))
 
 
-# ---------------------------------------------------------------- AI generation
-MELODY_MODEL = "facebook/musicgen-melody"
-ALLOWED_MODELS = {"facebook/musicgen-small", "facebook/musicgen-medium", MELODY_MODEL}
-GEN_LOCK = threading.Lock()
-_gen = {"name": None, "model": None, "processor": None, "device": None}
+# ---------------------------------------------------------------- sound finder
+# Real recorded samples found by describing them (see library.py). The model
+# loads on the first search and unloads after 10 idle minutes.
+import library
+
+FOUND = SAMPLES / "found"
 
 
-class GenRequest(BaseModel):
-    prompt: str
-    duration: float = 4.0
-    model: str = "facebook/musicgen-small"
-    melody_b64: Optional[str] = None  # WAV bytes, base64 -> melody conditioning
+class FindRequest(BaseModel):
+    q: str = ""
+    n: int = 8
+    audio_b64: Optional[str] = None   # "find sounds like this": a WAV
 
 
-def _load_gen_model(name):
-    import torch
-    from transformers import AutoProcessor
-    if name == MELODY_MODEL:
-        from transformers import MusicgenMelodyForConditionalGeneration as ModelCls
-    else:
-        from transformers import MusicgenForConditionalGeneration as ModelCls
-
-    if _gen["name"] == name and _gen["model"] is not None:
-        return
-    # release the previous model before loading a new one
-    _gen["model"] = None
-    _gen["processor"] = None
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    processor = AutoProcessor.from_pretrained(name)
-    model = ModelCls.from_pretrained(name, torch_dtype=dtype)
-    model.to(device)
-    model.eval()
-    _gen.update(name=name, model=model, processor=processor, device=device)
+@app.get("/api/library/status")
+def library_status():
+    return library.status()
 
 
-@app.post("/api/generate")
-def generate(req: GenRequest):
+@app.post("/api/library/search")
+def library_search(req: FindRequest):
+    st = library.status()
+    if not st["ready"]:
+        raise HTTPException(status_code=503, detail="The sound library isn't indexed yet"
+                            + (" (indexing now)" if st["building"] else ""))
+    n = max(1, min(30, req.n))
     try:
-        import torch
-        import soundfile as sf
-    except ImportError as e:
-        raise HTTPException(
-            status_code=501,
-            detail=f"AI dependencies not installed ({e}). Re-run the installer without --no-ai.",
-        )
-    prompt = req.prompt.strip()
-    if not prompt:
-        raise HTTPException(status_code=400, detail="Empty prompt")
-    if not GEN_LOCK.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="A generation is already running")
-    try:
-        name = req.model if req.model in ALLOWED_MODELS else "facebook/musicgen-small"
-        dur = min(20.0, max(1.0, float(req.duration or 4.0)))
-
-        melody = None
-        if req.melody_b64:
+        if req.audio_b64:
             import base64
             import io
-            import numpy as np
-            try:
-                raw = base64.b64decode(req.melody_b64)
-                wav, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
-            except Exception:
-                raise HTTPException(status_code=400, detail="Could not decode melody audio")
-            mono = wav.mean(axis=1)
-            target = 32000  # musicgen sampling rate
-            if sr != target and len(mono) > 1:
-                n = max(1, int(len(mono) * target / sr))
-                mono = np.interp(
-                    np.linspace(0, len(mono) - 1, n),
-                    np.arange(len(mono)), mono,
-                ).astype("float32")
-            melody = mono[: target * 20]  # cap conditioning at 20s
-            name = MELODY_MODEL  # melody conditioning requires the melody model
-
-        _load_gen_model(name)
-        model, processor, device = _gen["model"], _gen["processor"], _gen["device"]
-
-        if melody is not None:
-            feats = processor(audio=melody, sampling_rate=32000,
-                              text=[prompt], padding=True, return_tensors="pt")
-        else:
-            feats = processor(text=[prompt], padding=True, return_tensors="pt")
-        inputs = {}
-        for k, v in feats.items():
-            v = v.to(device)
-            if device == "cuda" and v.dtype == torch.float32:
-                v = v.half()  # match the fp16 model
-            inputs[k] = v
-        max_new_tokens = min(1024, int(dur * 50) + 4)  # MusicGen: ~50 tokens/sec
-        with torch.inference_mode():
-            audio = model.generate(
-                **inputs,
-                do_sample=True,
-                guidance_scale=3.0,
-                max_new_tokens=max_new_tokens,
-            )
-        rate = model.config.audio_encoder.sampling_rate
-        data = audio[0].cpu().float().numpy().T  # (frames, channels)
-
-        out_dir = SAMPLES / "generated"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40] or "sample"
-        fname = f"{slug}-{int(time.time())}.wav"
-        sf.write(out_dir / fname, data, rate)
-        return {"ok": True, "path": f"generated/{fname}", "name": Path(fname).stem}
+            import librosa
+            import soundfile as sf
+            wav, sr = sf.read(io.BytesIO(base64.b64decode(req.audio_b64)), dtype="float32", always_2d=True)
+            mono = wav.mean(axis=1)[: sr * int(library.CLIP_SECONDS)]
+            if sr != library.SR:
+                mono = librosa.resample(mono, orig_sr=sr, target_sr=library.SR)
+            return {"results": library.similar(mono, n)}
+        if not req.q.strip():
+            raise HTTPException(status_code=400, detail="Describe the sound you want")
+        return {"results": library.search(req.q.strip(), n)}
     except HTTPException:
         raise
-    except Exception as e:
-        msg = str(e)
-        if "out of memory" in msg.lower():
-            try:
-                import torch
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
-            raise HTTPException(
-                status_code=507,
-                detail="CUDA out of memory - free VRAM (e.g. docker stop wm-llama) "
-                       "and retry, or switch to musicgen-small.",
-            )
-        raise HTTPException(status_code=500, detail=f"Generation failed: {msg[:300]}")
-    finally:
-        GEN_LOCK.release()
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=f"Sound finder needs torch + transformers ({e})")
+
+
+class TakeRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/library/take")
+def library_take(req: TakeRequest):
+    """Copy a found library sound into samples/found/ so projects own it."""
+    src = safe_child(SAMPLES, req.path)
+    if not src.is_file() or "library" != Path(req.path).parts[0]:
+        raise HTTPException(status_code=400, detail="Not a library sound")
+    FOUND.mkdir(parents=True, exist_ok=True)
+    parts = Path(req.path).parts
+    # library-instrument-articulation-file, e.g. VSCO-2-CE-Cello-Section-spic-spic_A2_v2_RR1
+    stem = re.sub(r"[^A-Za-z0-9#._-]+", "-", "-".join(parts[1:2] + parts[2:-1][-2:]) + "-" + src.stem).strip("-")[:110]
+    dst = FOUND / (stem + src.suffix.lower())
+    if not dst.exists():
+        dst.write_bytes(src.read_bytes())
+    return {"ok": True, "path": dst.relative_to(SAMPLES).as_posix(), "name": src.stem}
+
+
+def _unload_idle_model():
+    while True:
+        time.sleep(60)
+        library.unload_if_idle(600)
+
+
+threading.Thread(target=_unload_idle_model, daemon=True).start()
 
 
 @app.middleware("http")

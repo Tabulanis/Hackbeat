@@ -1,5 +1,7 @@
-torch==2.13.0
-torchaudio==2.11.0
-transformers==5.14.1
-soundfile==0.14.0
-sentencepiece==0.2.2
+# Find a Sound (library.py): CLAP search over real recorded samples. CPU is fine:
+#   venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-ai.txt
+torch>=2.13
+transformers>=5.14
+soundfile>=0.14
+librosa>=0.11
+numpy

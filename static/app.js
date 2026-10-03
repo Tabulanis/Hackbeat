@@ -2181,184 +2181,116 @@ function renderInstruments() {
   if ($("#fx-body") && $("#fx-body").childElementCount) renderFxPanel();
 }
 
-/* melody conditioning: hum/whistle -> instrument */
-let genMelody = null;
-let humRec = null;
+/* ================= FIND A SOUND =================
+   Real recorded samples (library.py), found by describing them or by a
+   sound ("find sounds like this"). Taking one copies it into samples/found/
+   so the project owns it; a known pitch sets the slot's Pitch so C plays C. */
+const noteLabel = (p) => (p == null ? "" : NOTE_NAMES[p % 12].replace("-", "") + (Math.floor(p / 12) - 1));
 
-async function setGenMelody(buf) {
-  const blob = encodeWav(buf);
-  const b64 = await new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(String(r.result).split(",")[1]);
-    r.onerror = () => rej(new Error("Could not encode melody"));
-    r.readAsDataURL(blob);
-  });
-  genMelody = { b64, dur: buf.length / buf.sampleRate };
-  $("#gen-melody-status").textContent =
-    "melody " + genMelody.dur.toFixed(1) + "s \u00b7 will use musicgen-melody";
-  $("#gen-melody-clear").hidden = false;
-}
-
-$("#gen-melody-clear").addEventListener("click", () => {
-  genMelody = null;
-  $("#gen-melody-status").textContent = "no melody";
-  $("#gen-melody-clear").hidden = true;
-});
-
-$("#gen-hum").addEventListener("click", async () => {
-  const btn = $("#gen-hum");
-  if (humRec) { humRec.stop(); return; }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    toast("Recording needs mic access \u2014 open via http://localhost:8200");
-    return;
-  }
+async function findSounds(body, resultsEl, statusEl, onPick, pickLabel) {
+  statusEl.textContent = "Searching\u2026 (the first search wakes the finder up)";
+  resultsEl.innerHTML = "";
   try {
-    const stream = await openAudioInput();
-    const chunks = [];
-    const rec = newRecorder(stream);
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      btn.classList.remove("recording");
-      btn.innerHTML = "&#9679; Hum";
-      humRec = null;
-      try {
-        const ab = await new Blob(chunks).arrayBuffer();
-        const buf = await AC.decodeAudioData(ab);
-        await setGenMelody(buf);
-        toast("Melody captured \u2014 type a style prompt and hit Generate");
-      } catch (err) {
-        $("#gen-melody-status").textContent = "no melody";
-        toast("Could not decode hum: " + err.message);
-      }
-    };
-    rec.start();
-    humRec = rec;
-    btn.classList.add("recording");
-    btn.innerHTML = "&#9632; Stop";
-    $("#gen-melody-status").textContent = "listening\u2026 hum or whistle, then Stop";
-  } catch (err) {
-    toast("Mic access denied: " + err.message);
-  }
-});
-
-/* ai generation */
-const STYLE_ADDONS = {
-  single: ", played by one solo instrument completely alone, unaccompanied, no other instruments, no backing",
-  ensemble: ", performed by a full ensemble, multiple instruments playing together, rich layered arrangement",
-  onenote: ", one single sustained note held steady, a single pitch only, no melody, no rhythm, no accompaniment",
-};
-
-function wireStyleButtons(scopeSel) {
-  const btns = document.querySelectorAll(scopeSel + " .gen-style-btn");
-  let current = null;
-  btns.forEach((b) => b.addEventListener("click", () => {
-    current = current === b.dataset.style ? null : b.dataset.style;
-    btns.forEach((x) => x.classList.toggle("toggled", x.dataset.style === current));
-  }));
-  return () => current;
-}
-const getGenStyle = wireStyleButtons("#gen-panel");
-const getEmGenStyle = wireStyleButtons("#em-box");
-
-/* shared generation call - used by both the palette GENERATE panel and
-   the sample editor's GENERATE panel, so they can never drift apart */
-async function runGenerate({ prompt, duration, model, melody, style, statusEl }) {
-  if (!prompt) { toast("Type a prompt first"); return null; }
-  if (style && STYLE_ADDONS[style]) prompt += STYLE_ADDONS[style];
-  if (statusEl) {
-    statusEl.textContent = melody
-      ? "Generating from your melody\u2026 first run downloads musicgen-melody (~6GB)."
-      : "Generating\u2026 first run downloads the model.";
-  }
-  try {
-    const res = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        duration: duration || 4,
-        model,
-        melody_b64: melody ? melody.b64 : undefined,
-      }),
+    const res = await fetch("/api/library/search", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Generation failed");
-    return data;
+    if (!res.ok) throw new Error(data.detail || "Search failed");
+    statusEl.textContent = data.results.length ? "" : "Nothing found";
+    for (const r of data.results) {
+      const row = document.createElement("div");
+      row.className = "find-row";
+      const play = document.createElement("button");
+      play.className = "mini-btn"; play.textContent = "\u25b6"; play.title = "Listen";
+      play.addEventListener("click", () => previewLibrary(r.path, play));
+      const label = document.createElement("span");
+      label.className = "find-name";
+      label.textContent = r.name;
+      label.title = r.name + " \u00b7 " + r.source + (r.pitch != null ? " \u00b7 note " + noteLabel(r.pitch) : "");
+      const src = document.createElement("span");
+      src.className = "find-src";
+      src.textContent = r.source.split(" ")[0] + (r.pitch != null ? " \u00b7 " + noteLabel(r.pitch) : "");
+      const take = document.createElement("button");
+      take.className = "mini-btn"; take.textContent = pickLabel;
+      take.addEventListener("click", async () => {
+        take.disabled = true;
+        try {
+          const t = await fetch("/api/library/take", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: r.path }),
+          });
+          const got = await t.json();
+          if (!t.ok) throw new Error(got.detail || "Couldn't take it");
+          await onPick(got.path, r);
+        } catch (err) { toast(err.message); }
+        take.disabled = false;
+      });
+      row.append(play, label, src, take);
+      resultsEl.appendChild(row);
+    }
   } catch (err) {
-    toast(err.message);
-    return null;
-  } finally {
-    if (statusEl) statusEl.textContent = "";
+    statusEl.textContent = err.message;
   }
 }
 
-$("#btn-generate").addEventListener("click", async () => {
-  const btn = $("#btn-generate");
-  btn.disabled = true;
-  const data = await runGenerate({
-    prompt: $("#gen-prompt").value.trim(),
-    duration: parseFloat($("#gen-dur").value),
-    model: $("#gen-model").value,
-    melody: genMelody,
-    style: getGenStyle(),
-    statusEl: $("#gen-status"),
-  });
-  if (data) {
-    await refreshPalette();
-    await addInstrument(data.path, data.name);
-    toast("Generated: " + data.name);
-  }
-  btn.disabled = false;
-});
+let libPreview = null;
+async function previewLibrary(path, btn) {
+  if (libPreview) { try { libPreview.stop(); } catch (_) {} libPreview = null; }
+  try {
+    const buf = await getBuffer(path);
+    AC.resume();
+    const s = AC.createBufferSource();
+    s.buffer = buf; s.connect(master); s.start();
+    libPreview = s;
+  } catch (err) { toast(err.message); }
+}
 
-/* editor-side generation: result loads straight into the waveform */
-let emGenMelody = null;
-$("#em-gen-tomelody").addEventListener("click", async () => {
-  if (!em.buf) { toast("No audio loaded in the editor"); return; }
+const pitchFor = (p) => (p == null ? 0 : Math.max(-24, Math.min(24, 60 - p)));
+
+// sidebar: + adds it as an instrument
+async function paletteFind() {
+  const q = $("#find-q").value.trim();
+  if (!q) { toast("Describe the sound you want"); return; }
+  await findSounds({ q, n: 8 }, $("#find-results"), $("#find-status"), async (path, r) => {
+    await refreshPalette();
+    await addInstrument(path, r.name);
+    const inst = song.instruments[ui.curInstrument];
+    if (inst && inst.path === path && r.pitch != null && !inst.transpose) {
+      inst.transpose = pitchFor(r.pitch);
+      renderFxPanel();
+      autosave();
+    }
+  }, "+");
+}
+$("#find-go").addEventListener("click", paletteFind);
+$("#find-q").addEventListener("keydown", (e) => { if (e.key === "Enter") paletteFind(); });
+
+// editor: Load puts it in the editor (undoable), ready to shape and Save / Replace
+async function editorPick(path, r) {
+  const buf = await getBuffer(path);
+  emStop();
+  if (em.buf) emPushUndo();
+  em.buf = copyBuffer(buf);
+  em.sel = null;
+  emDraw();
+  toast("Loaded " + r.name + (r.pitch != null ? " (note " + noteLabel(r.pitch) + ")" : "") + " \u2014 Replace or Save to keep it");
+}
+async function editorFind() {
+  const q = $("#em-find-q").value.trim();
+  if (!q) { toast("Describe the sound you want"); return; }
+  await findSounds({ q, n: 8 }, $("#em-find-results"), $("#em-find-status"), editorPick, "Load");
+}
+$("#em-find-go").addEventListener("click", editorFind);
+$("#em-find-q").addEventListener("keydown", (e) => { if (e.key === "Enter") editorFind(); });
+$("#em-find-like").addEventListener("click", async () => {
+  if (!em.buf) { toast("Nothing in the editor to match"); return; }
   const blob = encodeWav(em.buf);
   const b64 = await new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(String(r.result).split(",")[1]);
-    r.onerror = () => rej(new Error("Could not encode melody"));
-    r.readAsDataURL(blob);
+    const rd = new FileReader();
+    rd.onload = () => res(String(rd.result).split(",")[1]);
+    rd.onerror = () => rej(new Error("Could not read the sound"));
+    rd.readAsDataURL(blob);
   });
-  emGenMelody = { b64 };
-  $("#em-gen-melody-status").textContent =
-    "using current audio as melody (" + (em.buf.length / em.buf.sampleRate).toFixed(1) + "s)";
-});
-
-$("#em-generate").addEventListener("click", async () => {
-  const btn = $("#em-generate");
-  btn.disabled = true;
-  const data = await runGenerate({
-    prompt: $("#em-gen-prompt").value.trim(),
-    duration: parseFloat($("#em-gen-dur").value),
-    model: $("#em-gen-model").value,
-    melody: emGenMelody,
-    style: getEmGenStyle(),
-    statusEl: $("#em-gen-status"),
-  });
-  if (data) {
-    try {
-      const buf = await getBuffer(data.path);
-      em.buf = copyBuffer(buf);
-      em.path = data.path;
-      em.name = data.name;
-      em.folder = data.path.includes("/") ? data.path.slice(0, data.path.lastIndexOf("/")) : "";
-      em.sel = null;
-      em.undo = [];
-      $("#em-title").textContent = "SAMPLE EDITOR \u2014 " + em.name.toUpperCase();
-      $("#em-name").value = em.name + "-edit";
-      $("#em-replace").disabled = false;
-      emDraw();
-      await refreshPalette();
-      toast("Generated into editor: " + data.name);
-    } catch (err) {
-      toast(err.message);
-    }
-  }
-  btn.disabled = false;
+  await findSounds({ audio_b64: b64, n: 8 }, $("#em-find-results"), $("#em-find-status"), editorPick, "Load");
 });
 
 /* count where a sample is actually used, so deletion warns honestly */
@@ -3345,11 +3277,6 @@ async function emApplyStretch() {
 }
 $("#em-stretchapply").addEventListener("click", () => emApplyStretch().catch((e) => toast(e.message)));
 $("#em-record").addEventListener("click", emToggleRecord);
-$("#em-tomelody").addEventListener("click", async () => {
-  if (!em.buf) { toast("No audio loaded"); return; }
-  await setGenMelody(em.buf);
-  toast("Melody set — type a style prompt in GENERATE and go");
-});
 $("#em-savenew").addEventListener("click", () => emSave(false));
 $("#em-replace").addEventListener("click", () => emSave(true));
 

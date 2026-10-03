@@ -864,3 +864,13 @@ body:has(#keyboard-dock:not(.hidden)) #workspace {
 .pcell.nudged::after { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); left: clamp(0%, calc(var(--nudge) * 100%), 97%); }
 .pcell.dragging { z-index: 5; opacity: 0.85; outline: 1px dashed var(--amber); cursor: grabbing; overflow: visible; }
 .pcell.dragging::before { content: attr(data-drag); position: absolute; top: -16px; left: 0; font-size: 10px; color: var(--amber); white-space: nowrap; }
+
+/* find a sound */
+#find-panel { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; }
+#find-panel .gen-row { display: flex; gap: 4px; }
+#find-q { flex: 1; min-width: 0; }
+.find-results { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.find-row { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 0; border-bottom: 1px solid var(--line); }
+.find-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.find-src { color: var(--dim); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+#em-find-q { flex: 1; min-width: 200px; }

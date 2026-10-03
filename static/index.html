@@ -113,29 +113,14 @@
     <div id="palette-list"></div>
     <div class="palette-foot">Click a sample to load it as the next instrument &middot; &#9654; previews</div>
 
-    <div class="palette-head"><span>GENERATE</span></div>
-    <div id="gen-panel">
-      <input id="gen-prompt" type="text" placeholder="e.g. punchy analog techno kick" spellcheck="false">
-      <div class="gen-row gen-style">
-        <button class="gen-style-btn" data-style="single" title="Adds: one solo instrument, unaccompanied">Single</button>
-        <button class="gen-style-btn" data-style="ensemble" title="Adds: full ensemble, layered arrangement">Ensemble</button>
-        <button class="gen-style-btn" data-style="onenote" title="Adds: one sustained pitch only - great for playable instruments">One Note</button>
-      </div>
+    <div class="palette-head"><span>FIND A SOUND</span></div>
+    <div id="find-panel">
       <div class="gen-row">
-        <label>Sec</label>
-        <input id="gen-dur" type="number" min="1" max="20" value="4">
-        <select id="gen-model">
-          <option value="facebook/musicgen-small" selected>small (fast)</option>
-          <option value="facebook/musicgen-medium">medium (better)</option>
-        </select>
+        <input id="find-q" type="text" placeholder="e.g. dry tight snare · warm cello · glassy bell" spellcheck="false">
+        <button id="find-go" class="accent">Find</button>
       </div>
-      <div class="gen-row">
-        <button id="gen-hum">&#9679; Hum</button>
-        <span id="gen-melody-status" class="em-info">no melody</span>
-        <button id="gen-melody-clear" class="mini-btn" hidden title="Clear melody">&#10005;</button>
-      </div>
-      <button id="btn-generate" class="accent">Generate</button>
-      <div id="gen-status"></div>
+      <div id="find-status" class="em-info">Real recorded samples, found by describing them.</div>
+      <div id="find-results" class="find-results"></div>
     </div>
   </aside>
 
@@ -227,10 +212,6 @@
     <div class="em-row">
       <button id="em-record">&#9679; Record</button>
       <select id="input-device" class="input-device" title="Which mic or input to record from"></select>
-      <button id="em-tomelody" title="Use this audio as the melody for AI generation">&#8594; Melody</button>
-    </div>
-    <div class="em-row">
-      <span class="em-lab">GENERATE</span>
       <span id="em-recstatus" class="em-info"></span>
     </div>
     <div class="em-row">
@@ -243,25 +224,14 @@
     <div class="em-row">
       <span id="em-cellhint" class="em-info" hidden>Replace changes EVERY cell using this sample &middot; Apply to This Cell forks an edited copy for just this one cell</span>
     </div>
-        <div class="em-row em-gen-row">
-      <input id="em-gen-prompt" type="text" placeholder="style / instrument prompt" spellcheck="false">
-      <input id="em-gen-dur" type="number" min="1" max="20" value="4" title="Seconds">
-      <select id="em-gen-model">
-        <option value="facebook/musicgen-small" selected>small (fast)</option>
-        <option value="facebook/musicgen-medium">medium (better)</option>
-      </select>
-      <button id="em-gen-tomelody" title="Use the audio currently loaded above as the melody">Use audio as melody</button>
-      <button id="em-generate" class="accent">Generate into editor</button>
+    <div class="em-row em-gen-row">
+      <span class="em-lab">FIND A SOUND</span>
+      <input id="em-find-q" type="text" placeholder="describe it: dry tight snare, warm cello, glassy bell..." spellcheck="false">
+      <button id="em-find-go" class="accent">Find</button>
+      <button id="em-find-like" title="Real recordings that sound like what's in the editor now">Find sounds like this</button>
+      <span id="em-find-status" class="em-info"></span>
     </div>
-    <div class="em-row gen-style">
-      <button class="gen-style-btn" data-style="single" title="Adds: one solo instrument, unaccompanied">Single</button>
-      <button class="gen-style-btn" data-style="ensemble" title="Adds: full ensemble, layered arrangement">Ensemble</button>
-      <button class="gen-style-btn" data-style="onenote" title="Adds: one sustained pitch only - great for playable instruments">One Note</button>
-    </div>
-    <div class="em-row">
-      <span id="em-gen-status" class="em-info"></span>
-      <span id="em-gen-melody-status" class="em-info"></span>
-    </div>
+    <div id="em-find-results" class="find-results"></div>
   </div>
 </div>
 
@@ -326,7 +296,7 @@
         <a href="#h-fx">Mixing &amp; Effects</a>
         <a href="#h-instruments">Instruments &amp; the Library</a>
         <a href="#h-editor">The Sound Editor</a>
-        <a href="#h-ai">AI Sample Generation</a>
+        <a href="#h-ai">Find a Sound</a>
         <a href="#h-projects">Saving, Loading &amp; Export</a>
         <a href="#h-troubleshoot">Troubleshooting</a>
       </nav>
@@ -546,28 +516,19 @@
         </section>
 
         <section id="h-ai">
-          <h2>AI Sample Generation</h2>
-          <p>The <strong>GENERATE</strong> panel (bottom-left, and also inside
-          the Sound Editor) turns a text prompt into a new sample using
-          MusicGen. Type a style or instrument description, set a duration,
-          and hit Generate. First run downloads the model, so it'll be slow
-          exactly once.</p>
-          <p><strong>Style buttons:</strong> the Single / Ensemble /
-          One Note buttons quietly append extra instructions to your prompt.
-          <em>Single</em> pushes the model toward one unaccompanied
-          instrument, <em>Ensemble</em> toward a full layered arrangement,
-          and <em>One Note</em> toward a single sustained pitch &mdash; ideal
-          when you want a clean playable instrument tone, since Hackbeat
-          repitches from C-5. Click a button again to turn it off.</p>
-          <p><strong>Hum or whistle a melody:</strong> hit
-          <strong>&#9679; Hum</strong>, record yourself humming or whistling,
-          then type a style prompt (e.g. "warm analog synth lead") and
-          Generate. Hackbeat extracts the melody's pitch contour and
-          generates new audio that follows it in that style &mdash; this
-          automatically switches to the melody-aware model.</p>
-          <p>You can also send audio already open in the Sound Editor as the
-          melody, using its own <strong>Use audio as melody</strong> button
-          &mdash; useful if you've recorded or trimmed a whistle first.</p>
+          <h2>Find a Sound</h2>
+          <p>The <strong>FIND A SOUND</strong> panel (bottom-left, and inside
+          the Sound Editor) finds <em>real recorded</em> samples by describing
+          them: "dry tight snare", "warm cello note", "glassy bell", "brass
+          stab". The best 8 matches come back from thousands of recordings;
+          &#9654; plays one, <strong>+</strong> adds it as an instrument (or
+          <strong>Load</strong> puts it in the editor). When the recording's
+          note is known, its Pitch is set so it plays in tune.</p>
+          <p><strong>Find sounds like this</strong> (in the editor) searches by
+          the sound you have loaded instead of words.</p>
+          <p>The libraries: VCSL and VSCO-2 CE by Versilian Studios (CC0, free
+          for anything) and NSynth by Google Magenta (CC BY 4.0: free for
+          anything, with a credit &mdash; see LIBRARY-CREDITS.md).</p>
         </section>
 
         <section id="h-projects">
@@ -598,15 +559,16 @@
                 "(missing)".</strong> Its sample file was deleted from the
                 LIBRARY. Load a different sample into that slot, or find the
                 original file and re-import it.</li>
-            <li><strong>Generate fails with an error about dependencies.</strong>
-                The AI packages (torch/transformers) aren't installed in this
-                copy's virtual environment &mdash; re-run the installer
-                without the <code>--no-ai</code> flag.</li>
+            <li><strong>Find a Sound says the library isn't indexed.</strong>
+                Fetch the libraries (<code>samples/library/_dl/fetch.sh</code>)
+                and build the index once
+                (<code>venv/bin/python library.py build</code>); it needs the
+                AI packages (torch/transformers) installed.</li>
             <li><strong>Sound gets crackly or harsh with lots of channels.</strong>
                 Check the master headroom is doing its job &mdash; try easing
                 back individual channel volumes and the SEND BUSES send
                 amounts rather than the master fader.</li>
-            <li><strong>Recording or Humming doesn't prompt for the
+            <li><strong>Recording doesn't prompt for the
                 microphone.</strong> Browsers only allow mic access on
                 <code>localhost</code> or secure (https) pages &mdash; make
                 sure you're opening Hackbeat at

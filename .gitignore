@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 samples/generated/
 projects/.backups/
+samples/library/
+samples/found/
