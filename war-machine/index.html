@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#06070c">
+  <title>War Machine</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game" aria-label="War Machine"></canvas>
+
+  <!-- HUD lives in plain DOM: far simpler than drawing text in WebGL. -->
+  <div id="hud" class="hidden">
+    <div id="score">000000</div>
+    <div id="lives"><span>◆</span><span>◆</span><span>◆</span></div>
+    <div id="combo"></div>
+    <div id="beat"><div id="beat-fill"></div></div>
+  </div>
+
+  <div id="menu" class="overlay">
+    <h1>WAR MACHINE</h1>
+    <p class="tagline">Slice to the beat</p>
+    <div class="buttons">
+      <button data-bpm="100" data-name="RECRUIT">RECRUIT<small>100 BPM</small></button>
+      <button data-bpm="125" data-name="SOLDIER">SOLDIER<small>125 BPM</small></button>
+      <button data-bpm="150" data-name="WARLORD">WARLORD<small>150 BPM</small></button>
+    </div>
+    <ul class="legend">
+      <li><i class="drone"></i>Swipe through drones</li>
+      <li><i class="missile"></i>Swipe missiles <b>along their arrow</b></li>
+      <li><i class="mine"></i>Never touch a mine</li>
+    </ul>
+    <p class="hint">Slice right on the beat for PERFECT · P to pause</p>
+    <p id="best" class="hint"></p>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <p class="hint">Tap or press P to resume</p>
+  </div>
+
+  <div id="over" class="overlay hidden">
+    <h2>WAR MACHINE DOWN</h2>
+    <p id="final"></p>
+    <p id="final-best" class="hint"></p>
+    <button id="again">AGAIN</button>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
