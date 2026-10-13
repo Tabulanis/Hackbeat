@@ -2536,7 +2536,7 @@ const b64Cache = new WeakMap();
 async function sampleToBase64(path) {
   const buf = await getBuffer(path);
   if (b64Cache.has(buf)) return b64Cache.get(buf);
-  const blob = encodeWav(buf);
+  const blob = encodeWav16(buf);   // (2026-10-13) 16-bit inside a project: half the size of the float export, and a source sample never goes over 0 dB
   const b64 = await new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).split(",")[1]);
@@ -2555,7 +2555,15 @@ async function sampleToBase64(path) {
  * The quick localStorage autosave stays paths-only (it has a size limit). */
 async function serializeWithSamples() {
   const base = serialize();
-  const paths = [...new Set(song.instruments.map((i) => i.path))];
+  // only the sounds the song's notes actually USE (2026-10-13: a 30 KB song saved as 55 MB — six unused instrument slots, a 25 s
+  // bell and a 23 s gong among them, rode along in every save). An unused slot keeps its path, so it still works from the library.
+  const used = new Set();
+  for (const pat of song.patterns) for (const row of pat.data) for (const cell of row) {
+    if (!cell) continue;
+    const subs = cell.split && cell.subs ? cell.subs : [cell];
+    for (const n of subs) if (n && n.note != null) used.add(n.inst != null ? +n.inst : ui.curInstrument + 1);
+  }
+  const paths = [...new Set(song.instruments.filter((inst, i) => used.has(i + 1)).map((i) => i.path).filter(Boolean))];
   const sampleData = {};
   for (const path of paths) {
     try {
@@ -2778,6 +2786,21 @@ $("#backup-list").addEventListener("change", (e) => {
   e.target.value = "";
   if (n) restoreBackup(n);
 });
+
+/* a sound kept INSIDE a project file: 16-bit PCM (format 1) — sounds the same as the float dump and is half its size */
+function encodeWav16(rendered) {
+  const numCh = rendered.numberOfChannels, len = rendered.length, rate = rendered.sampleRate, blockAlign = numCh * 2, dataSize = len * blockAlign;
+  const buf = new ArrayBuffer(44 + dataSize), v = new DataView(buf);
+  const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  ws(0, "RIFF"); v.setUint32(4, 36 + dataSize, true); ws(8, "WAVE");
+  ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);   // 1 = PCM
+  v.setUint16(22, numCh, true); v.setUint32(24, rate, true); v.setUint32(28, rate * blockAlign, true); v.setUint16(32, blockAlign, true);
+  v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, dataSize, true);
+  const chans = []; for (let c = 0; c < numCh; c++) chans.push(rendered.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < numCh; c++) { const x = Math.max(-1, Math.min(1, chans[c][i])); v.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7fff, true); off += 2; }
+  return new Blob([buf], { type: "audio/wav" });
+}
 
 /* ================= export WAV ================= */
 function encodeWav(rendered) {
